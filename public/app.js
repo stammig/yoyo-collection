@@ -68,7 +68,6 @@ function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'C
 const SVG = {
   star: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 18.5 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/></svg>',
   starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.4l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17.6 6.6 20.3l1-6.1L3.2 9.9l6.1-.9z"/></svg>',
-  sparkle: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.5 5L18.5 8.5 13.5 10 12 15l-1.5-5L5.5 8.5 10.5 7z"/><path d="M18.5 14l.8 2.6L22 17.4l-2.7.8-.8 2.6-.8-2.6L15 17.4l2.7-.8z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6.5 7l.9 13h9.2l.9-13"/></svg>',
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.2 12 3l9 4.2v9.6L12 21l-9-4.2z"/><path d="M3 7.2 12 11.4l9-4.2M12 11.4V21"/></svg>',
