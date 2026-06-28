@@ -1,0 +1,35 @@
+# Render.com deploy blueprint.
+# In Render: New + → "Blueprint" → connect the repo containing this file.
+#
+# NOTE: the persistent disk below (which keeps your database + photos safe across
+# deploys) requires a paid instance plan. The free plan has NO persistent disk,
+# so data would be wiped on each redeploy/restart. Use "starter" (or higher).
+services:
+  - type: web
+    name: yoyo-collection
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      # Store the DB and uploaded photos on the persistent disk.
+      - key: DB_PATH
+        value: /var/data/yoyos.db
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      # Public can view (sensitive data hidden); you log in to edit.
+      # Set the actual password in the Render dashboard (Environment tab).
+      - key: ADMIN_PASSWORD
+        sync: false
+      # ---- Optional: once your page is live, restrict who can embed it ----
+      # - key: FRAME_ANCESTORS
+      #   value: "https://YOURSITE.com"
+      # ---- Optional: password-protect the WHOLE app (private instance) ----
+      # - key: AUTH_USER
+      #   value: "you"
+      # - key: AUTH_PASS
+      #   sync: false   # set the value in the Render dashboard, not in git
+    disk:
+      name: yoyo-data
+      mountPath: /var/data
+      sizeGB: 1

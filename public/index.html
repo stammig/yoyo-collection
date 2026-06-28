@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yoyo Collection</title>
+  <script>
+    // Appearance: ?theme= wins, then saved pref; "auto"/unset follows the OS.
+    try {
+      var _p = new URLSearchParams(location.search).get('theme');
+      var _s = localStorage.getItem('yoyoTheme');
+      var _t = (_p === 'light' || _p === 'dark') ? _p : _s;
+      if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar (macOS source list) -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="13.5" r="7.5"/><circle cx="12" cy="13.5" r="2.2"/><path d="M12 6V2.6"/></svg></span>
+        <span class="brand-name">Yoyo Collection</span>
+      </div>
+      <nav class="sidebar-nav" id="sidebarNav">
+        <button class="nav-item active" data-view="collection">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.4"/></svg>
+          <span>Collection</span>
+        </button>
+        <button class="nav-item hidden" data-view="arrivals" id="navArrivals">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="12" rx="2"/><path d="M1.5 6h13M5 1.5v2.5M11 1.5v2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <span>Arrivals</span>
+        </button>
+        <button class="nav-item" data-view="sale" id="navSale">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5.6l6.4 6.4-5.6 5.6L2 7.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="5.1" cy="5.1" r="1.1"/></svg>
+          <span>For Sale</span>
+        </button>
+        <button class="nav-item" data-view="insights">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="8" width="3.2" height="6.5" rx="1"/><rect x="6.4" y="4.5" width="3.2" height="10" rx="1"/><rect x="11.3" y="1.5" width="3.2" height="13" rx="1"/></svg>
+          <span>Insights</span>
+        </button>
+      </nav>
+      <div id="smartViews" class="smart-views hidden"></div>
+      <div class="sidebar-foot">
+        <button id="loginBtn" class="nav-item hidden">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3"/><path d="M2.5 14c0-3 2.5-4.5 5.5-4.5s5.5 1.5 5.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <span>Log in</span>
+        </button>
+        <button id="logoutBtn" class="nav-item hidden">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5H3.5A1.5 1.5 0 0 0 2 4v8a1.5 1.5 0 0 0 1.5 1.5H6M10 11l3-3-3-3M13 8H6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Log out</span>
+        </button>
+        <button id="settingsBtn" class="nav-item">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.5v1.6M8 12.9v1.6M2.4 4.8l1.4.8M12.2 10.4l1.4.8M2.4 11.2l1.4-.8M12.2 5.6l1.4-.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <div class="content">
+      <header class="toolbar">
+        <h1 class="toolbar-title" id="viewTitle">Collection</h1>
+        <div class="toolbar-spacer"></div>
+        <div class="toolbar-actions" id="collectionActions">
+          <div class="data-menu">
+            <button id="dataMenuBtn" class="icon-btn-lg" title="Import / Export / Backup" aria-expanded="false" aria-label="Data tools">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/></svg>
+            </button>
+            <div id="dataPanel" class="popover popover-menu hidden">
+              <a id="exportBtn" class="pop-action" href="/api/export.csv">Export CSV</a>
+              <button type="button" id="importBtn" class="pop-action">Import CSV…</button>
+              <div class="pop-sep"></div>
+              <a id="backupBtn" class="pop-action" href="/api/backup.zip">Download backup</a>
+              <button type="button" id="restoreBtn" class="pop-action">Restore backup…</button>
+            </div>
+          </div>
+          <button id="addBtn" class="btn btn-primary">＋ Add Yoyo</button>
+        </div>
+      </header>
+
+      <div class="views">
+        <!-- ============ Collection ============ -->
+        <section id="viewCollection" class="view active">
+          <div class="collection-header">
+          <section class="stats" id="stats"></section>
+
+          <section class="controls">
+            <input type="search" id="search" class="search" placeholder="Search brand, model, color, material…" />
+            <select id="sort" class="select">
+              <option value="brand">Sort: Brand</option>
+              <option value="model">Sort: Model</option>
+              <option value="weight_g">Sort: Weight</option>
+              <option value="paid">Sort: Paid</option>
+              <option value="retail">Sort: Retail</option>
+              <option value="percent_off">Sort: % off</option>
+              <option value="release_date">Sort: Release date</option>
+              <option value="favorite">Sort: Favorites first</option>
+            </select>
+            <button id="sortDirBtn" class="btn btn-ghost" title="Sort direction" aria-label="Sort direction">↑</button>
+            <div class="filter-menu">
+              <button id="filterBtn" class="btn btn-ghost" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.1"/><circle cx="9" cy="17" r="2.1"/></svg>
+                Filters <span id="filterCount" class="filter-count hidden">0</span>
+              </button>
+              <div id="filterPanel" class="popover filter-panel hidden"></div>
+            </div>
+            <button id="clearFilters" class="btn btn-ghost hidden">Clear all</button>
+          </section>
+          <section class="active-filters hidden" id="activeFilters"></section>
+
+          <section class="viewbar">
+            <div class="seg" role="group" aria-label="View mode">
+              <button id="viewTile" class="seg-btn" data-view="tile">Tiles</button>
+              <button id="viewRow" class="seg-btn" data-view="row">List</button>
+            </div>
+
+            <label id="sizeWrap" class="inline-label">Size
+              <select id="tileSize" class="select select-sm">
+                <option value="sm">Small</option>
+                <option value="md">Medium</option>
+                <option value="lg">Large</option>
+              </select>
+            </label>
+
+            <div class="fields-menu">
+              <button id="fieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
+              <div id="fieldsPanel" class="popover hidden"></div>
+            </div>
+
+            <button id="selectBtn" class="btn btn-ghost hidden" aria-pressed="false">☑ Select</button>
+            <button id="listEditBtn" class="btn btn-ghost hidden" aria-pressed="false">✎ Edit cells</button>
+
+            <span class="ctrl-spacer"></span>
+
+            <label class="inline-label">Per page
+              <select id="pageSize" class="select select-sm">
+                <option value="12">12</option>
+                <option value="24" selected>24</option>
+                <option value="48">48</option>
+                <option value="96">96</option>
+                <option value="all">All</option>
+              </select>
+            </label>
+          </section>
+          </div><!-- /collection-header -->
+
+          <section id="grid" class="grid"></section>
+          <div id="empty" class="empty hidden">
+            <strong>No yoyos to show</strong>
+            <span>Adjust your filters, add a yoyo, or import a CSV from the ••• menu.</span>
+          </div>
+
+          <nav id="pager" class="pager hidden">
+            <span id="pagerInfo" class="pager-info"></span>
+            <div class="pager-controls">
+              <button id="prevPage" class="btn btn-ghost">‹ Prev</button>
+              <span id="pageNums" class="page-nums"></span>
+              <button id="nextPage" class="btn btn-ghost">Next ›</button>
+            </div>
+          </nav>
+        </section>
+
+        <!-- ============ Arrivals ============ -->
+        <section id="viewArrivals" class="view hidden"></section>
+
+        <section id="viewSale" class="view hidden"></section>
+
+        <!-- ============ Insights ============ -->
+        <section id="viewInsights" class="view hidden"></section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden file inputs (used by the data menu) -->
+  <input type="file" id="importInput" accept=".csv,text/csv" hidden />
+  <input type="file" id="restoreInput" accept=".zip,application/zip" hidden />
+
+  <!-- Edit / Add modal -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2 id="modalTitle">Add Yoyo</h2>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <form id="yoyoForm" class="form">
+        <input type="hidden" name="id" />
+        <div class="edit-hero" id="editHero"></div>
+        <div class="form-body">
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="13.5" r="7.5"/><circle cx="12" cy="13.5" r="2.2"/><path d="M12 6V2.6"/></svg></span>
+            <div><h3>Identity</h3><p>What is it?</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Brand</label><input name="brand" list="brandList" placeholder="e.g. CLYW" /></div>
+            <div class="field"><label>Model</label><input name="model" placeholder="e.g. Chief" /></div>
+            <div class="field span2"><label>Color / Colorway</label><input name="color" placeholder="e.g. Blue Splash" /></div>
+            <div class="field span2"><label>Composition</label>
+              <div class="tile-group" data-for="composition">
+                <button type="button" class="tile" data-val="BI"><span>BI</span><small>Bi-metal</small></button>
+                <button type="button" class="tile" data-val="MN"><span>MN</span><small>Mono-metal</small></button>
+                <button type="button" class="tile" data-val="TRI"><span>TRI</span><small>Tri-metal</small></button>
+              </div>
+              <input type="hidden" name="composition" />
+            </div>
+            <div class="field span2"><label>Body Material</label><input name="body_material" list="materialList" placeholder="e.g. 6061 AL, SS" /></div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 7.2 12 3l9 4.2v9.6L12 21l-9-4.2z"/><path d="M3 7.2 12 11.4l9-4.2M12 11.4V21"/></svg></span>
+            <div><h3>Status</h3><p>Where it stands</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field span2"><label>Condition</label>
+              <div class="tile-group" data-for="condition">
+                <button type="button" class="tile" data-val="MiB"><span>MiB</span><small>Mint in box</small></button>
+                <button type="button" class="tile" data-val="NMBTS"><span>NMBTS</span><small>Near mint</small></button>
+                <button type="button" class="tile" data-val="Used"><span>Used</span></button>
+                <button type="button" class="tile" data-val="Beat"><span>Beat</span></button>
+              </div>
+              <input type="hidden" name="condition" />
+            </div>
+            <div class="field span2 toggles">
+              <label class="switch"><input type="checkbox" name="in_hand" /><span class="track"></span><span class="switch-label">In hand</span></label>
+              <label class="switch fav"><input type="checkbox" name="favorite" /><span class="track"></span><span class="switch-label">★ Favorite</span></label>
+              <label class="switch"><input type="checkbox" name="retired" /><span class="track"></span><span class="switch-label">Retired</span></label>
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 3.5h7.2l9.8 9.8-7.2 7.2-9.8-9.8z"/><circle cx="7.5" cy="7.5" r="1.4"/></svg></span>
+            <div><h3>Pricing</h3><p>Retail vs. what you paid</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Retail</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="retail" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field"><label>Paid</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="paid" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field"><label>Discount</label><div id="percentOff" class="off-badge">—</div></div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 3.5h7.2l9.8 9.8-7.2 7.2-9.8-9.8z"/><circle cx="7.5" cy="7.5" r="1.4"/></svg></span>
+            <div><h3>For Sale</h3><p>List it to sell or trade (shows on the public For Sale page)</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Sale Status</label>
+              <select name="sale_status" class="select">
+                <option value="">Not listed</option>
+                <option value="For Sale">For Sale</option>
+                <option value="For Trade">For Trade</option>
+                <option value="For Sale or Trade">For Sale or Trade</option>
+                <option value="Sold">Sold</option>
+              </select>
+            </div>
+            <div class="field"><label>Asking Price</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="sale_price" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="8.5" width="19" height="7" rx="1.5"/><path d="M6.5 8.5v3M10 8.5v4M13.5 8.5v3M17 8.5v4" stroke-linecap="round"/></svg></span>
+            <div><h3>Specs</h3><p>The numbers</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Weight</label><div class="affix-wrap post"><input name="weight_g" type="number" step="0.01" placeholder="0" /><span class="affix-post">g</span></div></div>
+            <div class="field"><label>Diameter</label><div class="affix-wrap post"><input name="diameter_mm" type="number" step="0.01" placeholder="0" /><span class="affix-post">mm</span></div></div>
+            <div class="field"><label>Width</label><div class="affix-wrap post"><input name="width_mm" type="number" step="0.01" placeholder="0" /><span class="affix-post">mm</span></div></div>
+            <div class="field"><label>Gap Width</label><div class="affix-wrap post"><input name="gap_mm" type="number" step="0.01" placeholder="0" /><span class="affix-post">mm</span></div></div>
+            <div class="field"><label>Bearing Size</label><input name="bearing_size" list="bearingList" placeholder="Size C / Size D" /></div>
+            <div class="field"><label>Response Type</label><input name="response_type" list="responseList" placeholder="e.g. 19mm pads" /></div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4" stroke-linecap="round"/></svg></span>
+            <div><h3>Details</h3><p>Release &amp; shipping</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Release Date</label><input name="release_date" placeholder="2025, 6/15/2026…" /></div>
+            <div class="field"><label>Tracking</label><input name="tracking" placeholder="Tracking number" /></div>
+            <div class="field"><label>ETA</label><input name="eta" type="date" /></div>
+          </div>
+          <div class="field full"><label>Description</label><textarea name="description" rows="3" placeholder="Notes, story, anything worth remembering…"></textarea></div>
+        </section>
+
+        <section class="form-section" id="customSection" hidden>
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>
+            <div><h3>More</h3><p>Your custom fields</p></div>
+          </header>
+          <div class="form-grid" id="customFields"></div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h2l1.4-2h7.2L18 6.5h1a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.4"/></svg></span>
+            <div><h3>Photos</h3><p>Show it off</p></div>
+          </header>
+          <div id="photoStrip" class="photo-strip"></div>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="photoInput" accept="image/*" multiple hidden />
+            <span class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+            <span class="dz-text">Click to add photos<br><small>or drag &amp; drop them here</small></span>
+          </label>
+        </section>
+
+        </div><!-- /form-body -->
+
+        <div class="modal-foot">
+          <button type="button" id="deleteBtn" class="btn btn-danger hidden">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" id="saveAddAnotherBtn" class="btn btn-ghost">Save &amp; add another</button>
+          <button type="submit" id="saveBtn" class="btn btn-primary">Save yoyo</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Datalists for free-but-suggested fields -->
+  <datalist id="brandList"></datalist>
+  <datalist id="compositionList">
+    <option value="BI">Bi-metal</option>
+    <option value="MN">Mono-metal</option>
+    <option value="TRI">Tri-metal</option>
+  </datalist>
+  <datalist id="conditionList">
+    <option value="MiB">Mint in Box</option>
+    <option value="NMBTS">Near Mint But Thrown Some</option>
+    <option value="Used"></option>
+    <option value="Beat"></option>
+  </datalist>
+  <datalist id="bearingList">
+    <option value="Size C"></option>
+    <option value="Size D"></option>
+  </datalist>
+  <datalist id="materialList"></datalist>
+  <datalist id="responseList"></datalist>
+
+  <!-- Detail (read-only) modal -->
+  <div id="detailModal" class="modal hidden">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2 id="detailTitle">Yoyo</h2>
+        <div class="detail-nav">
+          <button id="detailPrev" class="icon-btn" title="Previous (←)" aria-label="Previous">‹</button>
+          <button id="detailNext" class="icon-btn" title="Next (→)" aria-label="Next">›</button>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <div id="detailBody" class="detail-body"></div>
+      <div class="modal-foot">
+        <button type="button" id="detailDelete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-close>Close</button>
+        <button type="button" id="detailEdit" class="btn btn-primary">✎ Edit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings (admin panel) modal -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <div class="form">
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg></span>
+            <div><h3>Appearance</h3><p>Theme</p></div>
+          </header>
+          <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+            <button type="button" class="seg-btn" data-theme="auto">Auto</button>
+            <button type="button" class="seg-btn" data-theme="light">Light</button>
+            <button type="button" class="seg-btn" data-theme="dark">Dark</button>
+          </div>
+        </section>
+
+        <section class="form-section" id="bandwidthAdmin">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span>
+            <div><h3>Photos &amp; bandwidth</h3><p>Generate thumbnails to cut data use</p></div>
+          </header>
+          <p class="hint">Your photos are shown as small thumbnails in the grid; the full image loads only when zoomed. Run this once after importing photos.</p>
+          <div class="blogo-toolbar">
+            <button type="button" id="optimizePhotosBtn" class="btn btn-primary">Optimize photos</button>
+          </div>
+          <div id="optimizeStatus" class="autofill-status hidden"></div>
+        </section>
+
+        <section class="form-section" id="fieldsAdmin">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.1"/><circle cx="9" cy="17" r="2.1"/></svg></span>
+            <div><h3>Custom fields</h3><p>Add your own columns</p></div>
+          </header>
+          <div id="fieldList" class="field-list"></div>
+
+          <form id="addFieldForm" class="add-field hidden">
+            <div class="form-grid">
+              <div class="field"><label>Field name</label><input name="label" placeholder="e.g. Box / Goodies" /></div>
+              <div class="field"><label>Type</label>
+                <select name="type">
+                  <option value="text">Text</option>
+                  <option value="number">Number</option>
+                  <option value="select">Choice (dropdown)</option>
+                  <option value="boolean">Yes / No</option>
+                </select>
+              </div>
+            </div>
+            <div class="field full" id="optionsWrap" hidden>
+              <label>Choices (comma-separated)</label>
+              <input name="options" placeholder="Box only, Goodies only, Both, Neither" />
+            </div>
+            <p id="fieldError" class="login-error hidden"></p>
+            <div class="add-field-foot">
+              <button type="button" class="btn btn-ghost" id="cancelAddField">Cancel</button>
+              <button type="submit" id="fieldSubmitBtn" class="btn btn-primary">Add field</button>
+            </div>
+          </form>
+
+          <button type="button" id="newFieldBtn" class="btn btn-ghost">＋ Add a field</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login modal -->
+  <div id="loginModal" class="modal hidden">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2>Log in</h2>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <form id="loginForm" class="form">
+        <div class="field">
+          <label>Password</label>
+          <input type="password" name="password" autocomplete="current-password" autofocus />
+        </div>
+        <p id="loginError" class="login-error hidden">Incorrect password.</p>
+        <div class="modal-foot">
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Log in</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox hidden" data-close>
+    <img id="lightboxImg" alt="" />
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

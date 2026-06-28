@@ -1,0 +1,42 @@
+{
+  "name": "yoyo-collection",
+  "version": "1.0.0",
+  "description": "A self-hosted web app to catalog and showcase your yoyo collection.",
+  "type": "module",
+  "main": "server.js",
+  "license": "MIT",
+  "author": "David Barker",
+  "homepage": "https://github.com/stammig/yoyo-collection#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stammig/yoyo-collection.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stammig/yoyo-collection/issues"
+  },
+  "keywords": [
+    "yoyo",
+    "collection",
+    "catalog",
+    "inventory",
+    "self-hosted",
+    "express",
+    "sqlite"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.2",
+    "express": "^4.21.2",
+    "multer": "^2.0.1",
+    "sharp": "^0.35.2"
+  }
+}

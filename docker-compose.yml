@@ -1,0 +1,20 @@
+# Run the whole app with one command:  docker compose up -d
+# Then open http://localhost:3000  (data persists in the "yoyo-data" volume).
+services:
+  yoyo:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - yoyo-data:/data
+    environment:
+      DB_PATH: /data/yoyos.db
+      UPLOAD_DIR: /data/uploads
+      # Uncomment to require a login for editing (public stays read-only):
+      # ADMIN_PASSWORD: change-me
+      # Optional features — see .env.example for the full list:
+      # ANTHROPIC_API_KEY: sk-ant-...
+    restart: unless-stopped
+
+volumes:
+  yoyo-data:

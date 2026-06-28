@@ -1,0 +1,13 @@
+node_modules/
+data/
+uploads/
+*.log
+.DS_Store
+.claude/
+.env
+# personal one-off scripts / local backups (not part of the project)
+fill-specs.*
+*.bak
+
+# SSL/ACME domain-validation files (cert-specific, not for the public repo)
+public/.well-known/
