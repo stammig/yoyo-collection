@@ -226,6 +226,52 @@ const uploadZip = multer({
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '365d', immutable: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---- Shareable per-yoyo page (/y/:id) ----
+// Serves the SPA but with per-yoyo Open Graph / Twitter tags injected into the
+// <head>, so a pasted link unfurls (photo + name + a few non-sensitive specs) in
+// chat apps and link previews. The client then opens that yoyo's read-only detail
+// view with its zoomable photo gallery (see the /y/ routing in public/app.js).
+const escHtml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+app.get('/y/:id', (req, res) => {
+  const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+  res.type('html');
+  const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);
+  if (!row) return res.send(indexHtml); // unknown id — just load the app
+
+  const y = decorate(row);
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+  const base = `${proto}://${req.get('host')}`;
+  const name = `${y.brand || ''} ${y.model || ''}`.trim() || 'Yoyo';
+
+  // Description: a few NON-sensitive specs (never paid/retail), plus sale info.
+  const bits = [];
+  if (y.weight_g) bits.push(`${y.weight_g} g`);
+  if (y.diameter_mm) bits.push(`${y.diameter_mm} mm`);
+  if (y.body_material) bits.push(y.body_material);
+  if (y.sale_status) bits.push(y.sale_price != null ? `${y.sale_status} · $${y.sale_price}` : y.sale_status);
+  const desc = bits.join(' · ') || (y.description || '').slice(0, 160) || 'From my yoyo collection';
+
+  const image = y.photos[0] ? base + y.photos[0].url : '';
+  const url = `${base}/y/${y.id}`;
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:site_name" content="Yoyo Collection" />`,
+    `<meta property="og:title" content="${escHtml(name)}" />`,
+    `<meta property="og:description" content="${escHtml(desc)}" />`,
+    `<meta property="og:url" content="${escHtml(url)}" />`,
+    image ? `<meta property="og:image" content="${escHtml(image)}" />` : '',
+    `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+    `<meta name="twitter:title" content="${escHtml(name)}" />`,
+    `<meta name="twitter:description" content="${escHtml(desc)}" />`,
+    image ? `<meta name="twitter:image" content="${escHtml(image)}" />` : '',
+  ].filter(Boolean).join('\n  ');
+
+  res.send(indexHtml.replace('</head>', `  ${tags}\n</head>`));
+});
+
 // ---- Helpers ----
 
 // Columns the client is allowed to write, with how to coerce each value.

@@ -13,7 +13,7 @@
       if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -355,6 +355,8 @@
       <div class="modal-foot">
         <button type="button" id="detailDelete" class="btn btn-danger">Delete</button>
         <span class="spacer"></span>
+        <button type="button" id="detailCopyLink" class="btn btn-ghost" title="Copy a shareable link to this yoyo">🔗 Copy link</button>
+        <button type="button" id="detailShare" class="btn btn-ghost" title="Download a shareable card image">⤓ Share card</button>
         <button type="button" class="btn btn-ghost" data-close>Close</button>
         <button type="button" id="detailEdit" class="btn btn-primary">✎ Edit</button>
       </div>
@@ -458,6 +460,6 @@
   <!-- Toast notifications -->
   <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
 
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

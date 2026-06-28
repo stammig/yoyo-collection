@@ -8,6 +8,7 @@ let filters = {
 };
 let editingId = null;
 let detailId = null;        // id currently shown in the read-only detail modal
+let shareMode = false;      // arrived via a /y/:id share link (focused single-yoyo view)
 let cameFromDetail = false; // whether the edit form was opened from the detail view
 let canEditState = true;    // whether the current viewer can edit (false = public view)
 let trackingEnabledState = false; // whether any carrier tracking API is configured
@@ -1457,7 +1458,25 @@ function detailHTML(y) {
   return hero + gallery + `<div class="detail-grid">${groups}${customGroup}</div>` + desc;
 }
 
-function closeDetail() { $('#detailModal').classList.add('hidden'); detailId = null; }
+// Open a yoyo from a /y/:id share link: a focused, read-only single-yoyo view
+// (the rest of the app's chrome is hidden until the visitor closes it).
+function openShareView(id) {
+  const y = yoyos.find((x) => x.id === id);
+  if (!y) { toast('That yoyo could not be found.', 'error'); return; }
+  shareMode = true;
+  document.body.classList.add('share-mode');
+  openDetail(id);
+}
+function closeDetail() {
+  $('#detailModal').classList.add('hidden');
+  detailId = null;
+  if (shareMode) {
+    // Closing a shared view drops the /y/:id path and reveals the full collection.
+    shareMode = false;
+    document.body.classList.remove('share-mode');
+    try { history.replaceState(null, '', '/'); } catch { /* ignore */ }
+  }
+}
 function detailStep(dir) {
   const i = detailList.indexOf(detailId);
   if (i < 0) return;
@@ -1477,6 +1496,347 @@ $('#detailDelete').addEventListener('click', async () => {
     closeDetail();
     await loadAll();
   } catch (err) { toast(err.message, 'error'); }
+});
+
+// ---- Share card (downloadable PNG) ----
+// Renders a self-contained image of one yoyo (photo + key specs) on a canvas so
+// it can be saved and posted/messaged anywhere. Entirely client-side — no server
+// route needed. Available to everyone, including public read-only viewers.
+
+const cssVar = (name, fallback) =>
+  (getComputedStyle(document.body).getPropertyValue(name).trim() || fallback);
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    // Photos are same-origin, so the canvas stays untainted without crossOrigin.
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('photo failed to load'));
+    img.src = src;
+  });
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+// The share card mirrors the collection's visible-field selection (`view.fields`).
+// Identity (brand + model) and the lead photo are always shown; everything else
+// follows whatever fields the user has chosen to display. These groupings decide
+// how each visible field is rendered, matching the tile-card conventions.
+const CARD_CHIP_KEYS = ['composition', 'condition', 'color'];   // rendered as pills
+const CARD_PRICE_KEYS = ['paid', 'retail', 'percent_off'];      // rendered as a price line
+// Keys handled specially — never rendered as a generic spec row.
+const CARD_SPECIAL_KEYS = new Set([
+  ...CARD_CHIP_KEYS, ...CARD_PRICE_KEYS,
+  'favorite', 'retired', 'sale_status', 'sale_price', 'in_hand', 'description',
+]);
+
+// Wrap a string to at most maxLines lines for the (already-set) ctx font,
+// adding an ellipsis to the final line when truncated.
+function wrapToLines(ctx, str, maxW, maxLines) {
+  const out = []; let line = ''; let truncated = false;
+  for (const w of String(str).split(/\s+/).filter(Boolean)) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) {
+      out.push(line); line = w;
+      if (out.length === maxLines) { truncated = true; line = ''; break; }
+    } else line = test;
+  }
+  if (line && out.length < maxLines) out.push(line);
+  if (truncated && out.length) {
+    let last = out[out.length - 1];
+    while (ctx.measureText(last + '…').width > maxW && last.length > 1) last = last.slice(0, -1);
+    out[out.length - 1] = last + '…';
+  }
+  return out;
+}
+
+async function renderCardBlob(y) {
+  const W = 1080, M = 48, PAD = 56;
+  const innerX = M + PAD, innerR = W - M - PAD, maxW = innerR - innerX;
+
+  const bg = cssVar('--bg', '#f5f5f7');
+  const surface = cssVar('--surface', '#ffffff');
+  const surface2 = cssVar('--surface-2', '#f5f5f7');
+  const surface3 = cssVar('--surface-3', '#ececed');
+  const text = cssVar('--text', '#1d1d1f');
+  const muted = cssVar('--muted', '#86868b');
+  const accent = cssVar('--accent', '#5e5ce6');
+  const onAccent = cssVar('--on-accent', '#ffffff');
+  const accentSoft = cssVar('--accent-soft', 'rgba(94,92,230,0.12)');
+  const border = cssVar('--border', 'rgba(0,0,0,0.08)');
+  const font = cssVar('--font', '-apple-system, BlinkMacSystemFont, sans-serif');
+
+  // Visible fields = the collection's current selection, filtered by the same
+  // public-sensitivity rule the rest of the UI uses.
+  const visible = (Array.isArray(view?.fields) ? view.fields : [])
+    .filter((k) => canEditState || !SENSITIVE.has(k));
+  const seen = (k) => visible.includes(k);
+  const has = (k) => { const v = valueOf(y, k); return v != null && v !== ''; };
+
+  // ---- Measure pass ----------------------------------------------------------
+  // Positions are anchored from the top; the card's total height is derived from
+  // the actual content so nothing can overlap or overflow, whatever the field
+  // selection is. A throwaway context is used purely for text measurement.
+  const mc = document.createElement('canvas').getContext('2d');
+  const imgX = M + 40, imgW = W - 2 * M - 80, imgTop = M + 40, imgH = 660;
+
+  // Title (+ favorite star), wrapped to at most 2 lines.
+  const fav = !!y.favorite;
+  mc.font = `600 62px ${font}`;
+  const title = `${y.brand || ''} ${y.model || ''}`.trim() || 'Untitled';
+  const titleLines = wrapToLines(mc, title, maxW - (fav ? 56 : 0), 2);
+
+  // Chips: always-on Retired status, then visible composition/condition/color,
+  // then In hand (when that field is shown and true). Wrapped across rows.
+  const chipDefs = [];
+  if (y.retired) chipDefs.push({ text: 'Retired', tone: 'muted' });
+  for (const k of visible) {
+    if (CARD_CHIP_KEYS.includes(k) && has(k)) chipDefs.push({ text: String(fmtField(k, valueOf(y, k))), tone: 'accent' });
+  }
+  if (seen('in_hand') && y.in_hand) chipDefs.push({ text: 'In hand', tone: 'accent' });
+  const chipH = 56, chipPad = 26, chipGap = 14, chipRowGap = 14;
+  mc.font = `500 30px ${font}`;
+  for (const c of chipDefs) c.w = mc.measureText(c.text).width + chipPad * 2;
+  const chipRows = [];
+  let crow = [], crowW = 0;
+  for (const c of chipDefs) {
+    if (crow.length && crowW + chipGap + c.w > maxW) { chipRows.push(crow); crow = []; crowW = 0; }
+    crow.push(c); crowW += (crow.length > 1 ? chipGap : 0) + c.w;
+  }
+  if (crow.length) chipRows.push(crow);
+  for (const r of chipRows) { let x = innerX; for (const c of r) { c.x = x; x += c.w + chipGap; } }
+
+  // Sale badge: always shown when a yoyo has a sale status (mirrors the tile / For
+  // Sale views, which surface it independent of the field picker).
+  let sale = null;
+  if (y.sale_status) {
+    const label = has('sale_price') ? `${y.sale_status} · ${money(y.sale_price)}` : y.sale_status;
+    mc.font = `600 32px ${font}`;
+    sale = { label, w: mc.measureText(label).width + 60, h: 64, sold: y.sale_status === 'Sold' };
+  }
+
+  // Price line: whichever of paid / retail / % off are visible and present.
+  const priceParts = [];
+  if (seen('paid') && has('paid')) priceParts.push({ text: money(y.paid), kind: 'main' });
+  if (seen('retail') && has('retail')) priceParts.push({ text: money(y.retail) + ' retail', kind: 'muted' });
+  if (seen('percent_off') && y.percent_off != null && y.percent_off > 0) priceParts.push({ text: y.percent_off + '% off', kind: 'accent' });
+
+  // Spec grid: every other visible field that has a value, in selection order.
+  const specs = visible
+    .filter((k) => !CARD_SPECIAL_KEYS.has(k) && has(k))
+    .map((k) => [FIELD_BY_KEY[k]?.label || k, String(fmtField(k, valueOf(y, k)))]);
+  const rowH = 96, colGap = 40;
+  const colW = (maxW - colGap) / 2;
+  const specRows = Math.ceil(specs.length / 2);
+
+  // Description (wrapped), when that field is shown.
+  let descLines = null;
+  if (seen('description') && has('description')) {
+    mc.font = `400 32px ${font}`;
+    descLines = wrapToLines(mc, String(valueOf(y, 'description')), maxW, 4);
+  }
+
+  // ---- Vertical layout -------------------------------------------------------
+  // Each optional block advances `cy` only when present, so the card is exactly
+  // as tall as its content.
+  let cy = imgTop + imgH + 78;                          // first title baseline
+  const titleBaselines = titleLines.map((_, i) => cy + i * 74);
+  cy = titleBaselines[titleBaselines.length - 1] ?? cy; // baseline of last title line
+
+  let chipsTop = 0;
+  if (chipRows.length) {
+    chipsTop = cy + 28;
+    cy = chipsTop + chipRows.length * chipH + (chipRows.length - 1) * chipRowGap;
+  }
+  let saleY = 0;
+  if (sale) { saleY = cy + 24; cy = saleY + sale.h; }
+  let priceBaseline = 0;
+  if (priceParts.length) { priceBaseline = cy + 60; cy = priceBaseline + 8; }
+  let specStartY = 0;
+  if (specs.length) {
+    specStartY = cy + 56;                                // label baseline of first row
+    cy = specStartY + (specRows - 1) * rowH + 46;        // value baseline of last row
+  }
+  let descTop = 0;
+  if (descLines) {
+    descTop = cy + 48;                                   // baseline of first description line
+    cy = descTop + (descLines.length - 1) * 44;
+  }
+  const dividerY = cy + 40;
+  const footerY = dividerY + 44;
+  const H = Math.round(footerY + 52);
+
+  // ---- Draw pass -------------------------------------------------------------
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Page background, then a rounded surface "card" with a soft shadow.
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.18)';
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 16;
+  roundRectPath(ctx, M, M, W - 2 * M, H - 2 * M, 40);
+  ctx.fillStyle = surface;
+  ctx.fill();
+  ctx.restore();
+
+  // Photo (cover-fit into a rounded box).
+  ctx.save();
+  roundRectPath(ctx, imgX, imgTop, imgW, imgH, 28);
+  ctx.clip();
+  const photo = y.photos && y.photos[0];
+  let img = null;
+  if (photo) { try { img = await loadImage(photo.url); } catch { img = null; } }
+  if (img) {
+    const s = Math.max(imgW / img.width, imgH / img.height);
+    const dw = img.width * s, dh = img.height * s;
+    ctx.drawImage(img, imgX + (imgW - dw) / 2, imgTop + (imgH - dh) / 2, dw, dh);
+  } else {
+    // Placeholder: brand initial on a soft fill.
+    ctx.fillStyle = surface2;
+    ctx.fillRect(imgX, imgTop, imgW, imgH);
+    ctx.fillStyle = muted;
+    ctx.font = `600 200px ${font}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText((y.brand || y.model || '?').trim().charAt(0).toUpperCase(), imgX + imgW / 2, imgTop + imgH / 2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+  ctx.restore();
+
+  // Title (+ favorite star).
+  ctx.fillStyle = text; ctx.font = `600 62px ${font}`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  titleLines.forEach((l, i) => ctx.fillText(l, innerX, titleBaselines[i]));
+  if (fav && titleLines.length) {
+    const lastLine = titleLines[titleLines.length - 1];
+    const lastBase = titleBaselines[titleBaselines.length - 1];
+    const lw = ctx.measureText(lastLine).width;
+    ctx.fillStyle = accent; ctx.font = `600 46px ${font}`;
+    ctx.fillText('★', innerX + lw + 18, lastBase);
+  }
+
+  // Chips (wrapped rows).
+  if (chipRows.length) {
+    ctx.font = `500 30px ${font}`;
+    chipRows.forEach((r, ri) => {
+      const ry = chipsTop + ri * (chipH + chipRowGap);
+      for (const c of r) {
+        roundRectPath(ctx, c.x, ry, c.w, chipH, chipH / 2);
+        ctx.fillStyle = c.tone === 'muted' ? surface3 : accentSoft; ctx.fill();
+        ctx.fillStyle = c.tone === 'muted' ? muted : accent;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(c.text, c.x + chipPad, ry + chipH / 2 + 1);
+      }
+    });
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // Sale badge.
+  if (sale) {
+    ctx.font = `600 32px ${font}`;
+    roundRectPath(ctx, innerX, saleY, sale.w, sale.h, sale.h / 2);
+    ctx.fillStyle = sale.sold ? surface3 : accent; ctx.fill();
+    ctx.fillStyle = sale.sold ? muted : onAccent;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sale.label, innerX + 30, saleY + sale.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // Price line.
+  if (priceParts.length) {
+    let px = innerX;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    for (const p of priceParts) {
+      if (p.kind === 'main') { ctx.font = `600 46px ${font}`; ctx.fillStyle = text; }
+      else if (p.kind === 'muted') { ctx.font = `500 30px ${font}`; ctx.fillStyle = muted; }
+      else { ctx.font = `600 30px ${font}`; ctx.fillStyle = accent; }
+      ctx.fillText(p.text, px, priceBaseline);
+      px += ctx.measureText(p.text).width + 20;
+    }
+  }
+
+  // Spec grid (2 columns).
+  specs.forEach(([label, val], i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = innerX + col * (colW + colGap);
+    const ry = specStartY + row * rowH;
+    ctx.fillStyle = muted;
+    ctx.font = `600 24px ${font}`;
+    ctx.fillText(String(label).toUpperCase(), x, ry);
+    ctx.fillStyle = text;
+    ctx.font = `500 40px ${font}`;
+    let v = String(val);
+    while (ctx.measureText(v).width > colW && v.length > 1) v = v.slice(0, -2) + '…';
+    ctx.fillText(v, x, ry + 46);
+  });
+
+  // Description.
+  if (descLines) {
+    ctx.fillStyle = text; ctx.font = `400 32px ${font}`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    descLines.forEach((l, i) => ctx.fillText(l, innerX, descTop + i * 44));
+  }
+
+  // Footer attribution.
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(innerX, dividerY); ctx.lineTo(innerR, dividerY); ctx.stroke();
+  const siteName = (document.querySelector('.brand-name')?.textContent || 'Yoyo Collection').trim();
+  ctx.fillStyle = muted;
+  ctx.font = `500 26px ${font}`;
+  ctx.textAlign = 'left'; ctx.fillText('🪀 ' + siteName, innerX, footerY);
+  ctx.textAlign = 'right'; ctx.fillText(location.host, innerR, footerY);
+  ctx.textAlign = 'left';
+
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas export failed'))), 'image/png'));
+}
+
+async function shareCard(id) {
+  const y = yoyos.find((x) => x.id === id);
+  if (!y) return;
+  const btn = $('#detailShare');
+  const original = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Rendering…'; }
+  try {
+    const blob = await renderCardBlob(y);
+    const slug = `${y.brand || ''}-${y.model || ''}`.trim()
+      .replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'yoyo';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${slug}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('Card image downloaded', 'success');
+  } catch (err) {
+    toast('Could not create card: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = original; }
+  }
+}
+$('#detailShare').addEventListener('click', () => { if (detailId) shareCard(detailId); });
+$('#detailCopyLink').addEventListener('click', async () => {
+  if (!detailId) return;
+  const url = `${location.origin}/y/${detailId}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Share link copied', 'success');
+  } catch {
+    // Clipboard API blocked (e.g. insecure context) — show the link to copy by hand.
+    toast(url, 'success');
+  }
 });
 
 // ---- Modal: add / edit ----
@@ -2390,9 +2750,13 @@ if (new URLSearchParams(location.search).get('embed')) document.body.classList.a
   await loadConfig();
   await Promise.all([loadFields(), loadSettings()]);
   buildFieldsPanel();
+  // Deep link: /y/:id opens one yoyo as a focused, shareable read-only view.
+  const shareId = Number((location.pathname.match(/^\/y\/(\d+)/) || [])[1]) || null;
   // Deep link: yoyo.example.com/#sale opens the For Sale page directly (shareable).
   const hash = (location.hash || '').replace('#', '').toLowerCase();
-  if (hash === 'sale' || hash === 'for-sale') {
+  if (shareId) {
+    // Stay on the collection underneath; the share view opens once data loads.
+  } else if (hash === 'sale' || hash === 'for-sale') {
     setView('sale');
   } else {
     try {
@@ -2401,5 +2765,7 @@ if (new URLSearchParams(location.search).get('embed')) document.body.classList.a
     } catch { /* ignore */ }
   }
   if (currentView === 'collection') renderSkeleton();
-  loadAll().catch((err) => toast('Failed to load: ' + err.message, 'error'));
+  loadAll()
+    .then(() => { if (shareId) openShareView(shareId); })
+    .catch((err) => toast('Failed to load: ' + err.message, 'error'));
 })();
