@@ -2,10 +2,15 @@
 
 A self-hosted web app to catalog and showcase your yoyo collection — specs,
 purchase info, condition, and multiple photos per throw, with search, filtering,
-sorting, stats, an arrivals calendar for on-order yoyos, and optional AI spec
-look-up. No build step, no accounts, runs from a single folder.
+sorting, stats, a public "For Sale" page, an arrivals calendar for on-order
+yoyos, and shareable links for individual throws. No build step, no accounts,
+runs from a single folder.
 
 > Catalog your throws, track what's on the way, and show off the collection.
+
+**Live demo:** [test.daveronica.com](https://test.daveronica.com) — log in with the
+password `demo` to see the owner/editing view. It's read-only, so you can't break
+anything.
 
 <!-- Add screenshots here once you have them, e.g.:
 ![Collection grid](docs/screenshot-grid.png)
@@ -17,14 +22,19 @@ look-up. No build step, no accounts, runs from a single folder.
   photos; rich search, filtering, sorting, and selectable columns.
 - **Full specs** — weight, diameter, width, gap, bearing, response, materials,
   composition, plus pricing (retail/paid, auto-computed % off) and condition.
-- **Photos** — multiple per yoyo, drag-to-reorder, auto-thumbnailed.
+- **Photos** — multiple per yoyo, drag-to-reorder, auto-thumbnailed, with a
+  click-to-zoom viewer.
+- **For Sale page** — a public, shareable page for the throws you're selling or
+  trading, with prices, status badges, and your own shipping/sale notes.
+- **Sharing** — share any single yoyo as its own link (it shows the photo and key
+  specs when pasted into a chat app), or download a clean card image to send.
 - **Arrivals** — a calendar of on-order yoyos by ETA, with inline tracking/ETA
   editing and an optional carrier "Query ETA" button.
 - **Insights** — collection totals, spend, standouts, and charts.
 - **CSV import / export** and **full backup / restore** (database + photos as one zip).
 - **Custom fields** — add your own beyond the built-ins.
 - **Public showcase mode** — set a password so visitors see a read-only
-  collection while you log in to edit.
+  collection (with prices and other private fields hidden) while you log in to edit.
 - **Dark mode**, responsive, and embeddable in an iframe.
 
 ## Stack
@@ -62,7 +72,10 @@ the app runs fully open on port 3000. Copy [`.env.example`](.env.example) to
 | `ADMIN_PASSWORD` | Public read-only + owner login to edit |
 | `READ_ONLY` | Make the whole app read-only |
 | `AUTH_USER` / `AUTH_PASS` | HTTP Basic auth over the entire app (fully private) |
-| `DEMO_MODE` | Public demo: login works but all writes are blocked |
+| `DEMO_MODE` | Public demo: login works but all writes are blocked, and pages are `noindex` |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | Throttle requests per IP (off by default; recommended for public instances) |
+| `FRAME_ANCESTORS` | Allow embedding the app in an `<iframe>` on your own site |
+| `SESSION_SECRET` | Override the auto-derived owner-login signing key |
 | `UPS_*` / `USPS_*` / `FEDEX_*` | Enable carrier ETA look-ups |
 
 See [`.env.example`](.env.example) for the complete, commented list.
@@ -114,7 +127,9 @@ The view toolbar (below the filters) controls how the collection is displayed,
 and your choices are remembered in the browser.
 
 - **Tiles ↔ Rows** — visual card grid or spreadsheet table. Click any tile/row
-  for a read-only detail view with all info and photos; **✎ Edit** from there.
+  for a detail view with all info and photos (click a photo to zoom); **✎ Edit**
+  from there. From the detail view you can also **🔗 Copy link** to share that one
+  yoyo as its own page, or **⤓ Share card** to download an image of it.
   Close any modal with its button, `Esc`, or by clicking outside.
 - **Sort by column** (row view) — click a header to sort; click again to reverse.
 - **Size** (tiles) — Small / Medium / Large.
@@ -140,6 +155,19 @@ Handy if you want to script against it (subject to the access mode above):
 - `POST /api/track` — carrier ETA look-up (needs carrier creds)
 - `GET /api/stats`, `GET /api/config`
 - `GET /api/backup.zip`, `POST /api/restore`
+- `GET /y/:id` — public, shareable page for a single yoyo (with link-preview tags)
+
+## Running it publicly
+If you put an instance on the open internet, a sensible setup is:
+- Set **`ADMIN_PASSWORD`** to a long, random value. This keeps the public view
+  read-only (prices and other private fields are hidden from visitors) while you
+  log in to edit. Avoid a short or guessable password.
+- Set **`RATE_LIMIT_MAX`** (e.g. `120`) to throttle abusive traffic and slow down
+  password-guessing.
+- Serve it over **HTTPS** and force a redirect from HTTP (most hosts can do this).
+- Keep the database and photos on a persistent disk (see **Data & backups**).
+
+That's it — there are no accounts or third-party services involved.
 
 ## Contributing
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
