@@ -278,10 +278,11 @@ app.get('/y/:id', (req, res) => {
 const TEXT_FIELDS = [
   'brand', 'model', 'color', 'body_material', 'composition', 'condition',
   'bearing_size', 'response_type', 'description', 'release_date', 'tracking', 'eta',
-  'sale_status',
+  'sale_status', 'purchase_date', 'sold_date', 'seller', 'buyer',
+  'finish', 'shape', 'edition', 'serial_number', 'signature',
 ];
 const NUMBER_FIELDS = [
-  'retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price',
+  'retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'market_value',
 ];
 const BOOL_FIELDS = ['in_hand', 'favorite', 'retired'];
 const WRITE_COLS = [...TEXT_FIELDS, ...NUMBER_FIELDS, ...BOOL_FIELDS];
@@ -384,7 +385,7 @@ function growSelectOptions(customObj) {
 }
 
 // Fields hidden from anyone who can't edit (public/read-only view).
-const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand'];
+const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value'];
 function publicSafe(y, editable) {
   if (editable) return y;
   const out = { ...y };
@@ -652,6 +653,9 @@ const CSV_MAP = [
   ['Color', 'color'],
   ['Retail', 'retail'],
   ['Paid', 'paid'],
+  ['Est. Value', 'market_value'],
+  ['Purchase Date', 'purchase_date'],
+  ['Seller', 'seller'],
   ['Percent off', null],
   ['Condition', 'condition'],
   ['Weight', 'weight_g'],
@@ -660,10 +664,17 @@ const CSV_MAP = [
   ['Gap Width', 'gap_mm'],
   ['Bearing Size', 'bearing_size'],
   ['Reponse Type', 'response_type'], // keeps the spreadsheet's original spelling
+  ['Finish', 'finish'],
+  ['Shape', 'shape'],
+  ['Edition', 'edition'],
+  ['Serial', 'serial_number'],
+  ['Signature', 'signature'],
   ['Description', 'description'],
   ['Release Date', 'release_date'],
   ['Tracking', 'tracking'],
   ['ETA', 'eta'],
+  ['Sold Date', 'sold_date'],
+  ['Buyer', 'buyer'],
   ['Favorite', 'favorite'],
   ['Photos', null],
   ['id', 'id'],

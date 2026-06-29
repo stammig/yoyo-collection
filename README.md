@@ -22,6 +22,9 @@ anything.
   photos; rich search, filtering, sorting, and selectable columns.
 - **Full specs** — weight, diameter, width, gap, bearing, response, materials,
   composition, plus pricing (retail/paid, auto-computed % off) and condition.
+- **Collector details** — finish, shape, edition/run, serial number, signature/collab,
+  and an estimated current value, alongside acquisition info (purchase & sold dates,
+  who you bought from / sold to). Private fields stay hidden from public viewers.
 - **Photos** — multiple per yoyo, drag-to-reorder, auto-thumbnailed, with a
   click-to-zoom viewer.
 - **For Sale page** — a public, shareable page for the throws you're selling or
@@ -139,9 +142,10 @@ and your choices are remembered in the browser.
 ## CSV import / export
 Use **⤓ Export CSV** / **⤴ Import CSV** in the toolbar. Columns:
 ```
-Brand, Model, Body Material, Composition, In Hand, Color, Retail, Paid,
-Percent off, Condition, Weight, Diameter, Width, Gap Width, Bearing Size,
-Reponse Type, Description, Release Date, Tracking, ETA
+Brand, Model, Body Material, Composition, In Hand, Color, Retail, Paid, Est. Value,
+Purchase Date, Seller, Percent off, Condition, Weight, Diameter, Width, Gap Width,
+Bearing Size, Reponse Type, Finish, Shape, Edition, Serial, Signature, Description,
+Release Date, Tracking, ETA, Sold Date, Buyer
 ```
 (export appends `Favorite`, `Photos`, and `id`). Import is lenient: column order
 and case don't matter, `$85.00`→85 and `64.60 g`→64.6 are parsed, % off is

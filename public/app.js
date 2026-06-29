@@ -82,7 +82,7 @@ const SVG = {
 };
 
 // Hidden from public viewers (financial, shipping, ownership status).
-const SENSITIVE = new Set(['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand']);
+const SENSITIVE = new Set(['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value']);
 
 // View prefs (persisted to localStorage).
 const DEFAULT_VIEW = {
@@ -106,15 +106,25 @@ const FIELD_DEFS = [
   { key: 'in_hand', label: 'In Hand', fmt: (v) => (v ? '✓' : '') },
   { key: 'retail', label: 'Retail', fmt: money, num: true },
   { key: 'paid', label: 'Paid', fmt: money, num: true },
+  { key: 'market_value', label: 'Est. Value', fmt: money, num: true },
+  { key: 'purchase_date', label: 'Purchase Date' },
+  { key: 'seller', label: 'Seller' },
   { key: 'percent_off', label: '% Off', fmt: (v) => (v == null ? '' : v + '%'), num: true },
   { key: 'sale_status', label: 'Sale' },
   { key: 'sale_price', label: 'Asking', fmt: money, num: true },
+  { key: 'sold_date', label: 'Sold Date' },
+  { key: 'buyer', label: 'Buyer' },
   { key: 'weight_g', label: 'Weight', fmt: (v) => (v ? v + ' g' : ''), num: true },
   { key: 'diameter_mm', label: 'Diameter', fmt: (v) => (v ? v + ' mm' : ''), num: true },
   { key: 'width_mm', label: 'Width', fmt: (v) => (v ? v + ' mm' : ''), num: true },
   { key: 'gap_mm', label: 'Gap', fmt: (v) => (v ? v + ' mm' : ''), num: true },
   { key: 'bearing_size', label: 'Bearing' },
   { key: 'response_type', label: 'Response' },
+  { key: 'finish', label: 'Finish' },
+  { key: 'shape', label: 'Shape' },
+  { key: 'edition', label: 'Edition' },
+  { key: 'serial_number', label: 'Serial #' },
+  { key: 'signature', label: 'Signature / Collab' },
   { key: 'release_date', label: 'Release' },
   { key: 'tracking', label: 'Tracking' },
   { key: 'eta', label: 'ETA' },
@@ -151,7 +161,8 @@ const DETAIL_GROUPS = [
   ['Overview', ['color', 'composition', 'body_material', 'condition']],
   ['Pricing', ['retail', 'paid', 'percent_off']],
   ['Specs', ['weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'bearing_size', 'response_type']],
-  ['Acquisition', ['release_date', 'tracking', 'eta']],
+  ['Edition & Finish', ['finish', 'shape', 'edition', 'serial_number', 'signature']],
+  ['Acquisition', ['release_date', 'purchase_date', 'seller', 'sold_date', 'buyer', 'tracking', 'eta']],
 ];
 
 // ---- DOM ----
@@ -241,11 +252,17 @@ const DATALIST_FIELD = {
   conditionList: 'condition',
   bearingList: 'bearing_size',
   responseList: 'response_type',
+  sellerList: 'seller',
+  buyerList: 'buyer',
+  finishList: 'finish',
+  shapeList: 'shape',
 };
 const DATALIST_SEEDS = {
   compositionList: ['BI', 'MN', 'TRI'],
   conditionList: ['MiB', 'NMBTS', 'Used', 'Beat'],
   bearingList: ['Size C', 'Size D'],
+  finishList: ['Blasted', 'Polished', 'Pyramatte', 'Matte', 'Satin', 'Raw'],
+  shapeList: ['Organic', 'H-Shape', 'V-Shape', 'W-Shape', 'Step Round'],
 };
 
 function refreshDatalists() {
@@ -628,9 +645,11 @@ function refreshCurrentView() {
 function buildPayload(y) {
   const p = {};
   ['brand', 'model', 'color', 'body_material', 'composition', 'condition',
-    'bearing_size', 'response_type', 'description', 'release_date', 'tracking', 'eta', 'sale_status']
+    'bearing_size', 'response_type', 'description', 'release_date', 'tracking', 'eta',
+    'sale_status', 'purchase_date', 'sold_date', 'seller', 'buyer',
+    'finish', 'shape', 'edition', 'serial_number', 'signature']
     .forEach((k) => { p[k] = y[k] ?? ''; });
-  ['retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price']
+  ['retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'market_value']
     .forEach((k) => { p[k] = y[k] ?? ''; });
   p.in_hand = !!y.in_hand;
   p.favorite = !!y.favorite;
@@ -1403,11 +1422,12 @@ function detailHTML(y) {
   const retiredBadge = y.retired ? '<span class="status-badge retired">Retired</span>' : '';
 
   let priceRow = '';
-  if (canEditState && (y.paid != null || y.retail != null)) {
+  if (canEditState && (y.paid != null || y.retail != null || y.market_value != null)) {
     const parts = [];
     if (y.paid != null) parts.push(`<span class="dh-paid">${money(y.paid)}</span>`);
     if (y.retail != null) parts.push(`<span class="dh-retail">${money(y.retail)} retail</span>`);
     if (y.percent_off != null && y.percent_off > 0) parts.push(`<span class="off">${y.percent_off}% off</span>`);
+    if (y.market_value != null) parts.push(`<span class="dh-retail">${money(y.market_value)} est. value</span>`);
     priceRow = `<div class="detail-hero-price">${parts.join('')}</div>`;
   }
 
@@ -1872,7 +1892,7 @@ function openEdit(id, fromDetail = false) {
     const field = form.elements[k];
     if (!field || field.tagName === undefined) continue;
     if (field.type === 'checkbox') field.checked = !!v;
-    else if (k === 'eta') field.value = toDateInputValue(v); // date input needs YYYY-MM-DD
+    else if (field.type === 'date') field.value = toDateInputValue(v); // date inputs need YYYY-MM-DD
     else field.value = v == null ? '' : v;
   }
   $('#deleteBtn').classList.remove('hidden');
@@ -2488,7 +2508,7 @@ async function loadConfig() {
 
 // In public view, the financial sort options would sort by hidden data, so hide them.
 function applySortVisibility() {
-  const sensitive = ['paid', 'retail', 'percent_off'];
+  const sensitive = ['paid', 'retail', 'percent_off', 'purchase_date', 'sold_date', 'market_value'];
   [...$('#sort').options].forEach((o) => {
     const hide = !canEditState && sensitive.includes(o.value);
     o.hidden = hide;

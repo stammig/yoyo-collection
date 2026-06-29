@@ -76,5 +76,25 @@ if (!yoyoCols.includes('sale_status')) {
 if (!yoyoCols.includes('sale_price')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN sale_price REAL');
 }
+if (!yoyoCols.includes('purchase_date')) {
+  db.exec("ALTER TABLE yoyos ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''");
+}
+if (!yoyoCols.includes('sold_date')) {
+  db.exec("ALTER TABLE yoyos ADD COLUMN sold_date TEXT NOT NULL DEFAULT ''");
+}
+if (!yoyoCols.includes('seller')) {
+  db.exec("ALTER TABLE yoyos ADD COLUMN seller TEXT NOT NULL DEFAULT ''");
+}
+if (!yoyoCols.includes('buyer')) {
+  db.exec("ALTER TABLE yoyos ADD COLUMN buyer TEXT NOT NULL DEFAULT ''");
+}
+if (!yoyoCols.includes('market_value')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN market_value REAL');
+}
+for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) {
+  if (!yoyoCols.includes(col)) {
+    db.exec(`ALTER TABLE yoyos ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
+  }
+}
 
 export default db;

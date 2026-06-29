@@ -17,10 +17,15 @@ CREATE TABLE IF NOT EXISTS yoyos (
   -- Pricing  (percent_off is computed from these, not stored)
   retail          REAL,
   paid            REAL,
+  market_value    REAL,                       -- estimated current value (owner-only)
+  purchase_date   TEXT NOT NULL DEFAULT '',   -- when you bought it (ISO date, owner-only)
+  seller          TEXT NOT NULL DEFAULT '',   -- who you bought it from (owner-only)
 
   -- For sale / trade (shown on the public For Sale page)
   sale_status     TEXT NOT NULL DEFAULT '',   -- '' | For Sale | For Trade | For Sale or Trade | Sold
   sale_price      REAL,                       -- asking price
+  sold_date       TEXT NOT NULL DEFAULT '',   -- when it sold (ISO date, owner-only)
+  buyer           TEXT NOT NULL DEFAULT '',   -- who you sold it to (owner-only)
 
   -- Specs
   weight_g        REAL,
@@ -29,6 +34,13 @@ CREATE TABLE IF NOT EXISTS yoyos (
   gap_mm          REAL,
   bearing_size    TEXT NOT NULL DEFAULT '',   -- Size C / Size D
   response_type   TEXT NOT NULL DEFAULT '',
+
+  -- Edition & appearance (collector details)
+  finish          TEXT NOT NULL DEFAULT '',   -- e.g. Blasted, Polished, Pyramatte, Raw
+  shape           TEXT NOT NULL DEFAULT '',   -- e.g. Organic, H-Shape, V-Shape, W-Shape
+  edition         TEXT NOT NULL DEFAULT '',   -- limited run, e.g. "1 of 50"
+  serial_number   TEXT NOT NULL DEFAULT '',   -- engraved serial, if any
+  signature       TEXT NOT NULL DEFAULT '',   -- signature player or maker/shop collab
 
   -- Details / acquisition
   description     TEXT NOT NULL DEFAULT '',

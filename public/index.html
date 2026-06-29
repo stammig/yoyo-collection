@@ -93,9 +93,12 @@
               <option value="model">Sort: Model</option>
               <option value="weight_g">Sort: Weight</option>
               <option value="paid">Sort: Paid</option>
+              <option value="market_value">Sort: Est. value</option>
               <option value="retail">Sort: Retail</option>
               <option value="percent_off">Sort: % off</option>
               <option value="release_date">Sort: Release date</option>
+              <option value="purchase_date">Sort: Purchase date</option>
+              <option value="sold_date">Sort: Sold date</option>
               <option value="favorite">Sort: Favorites first</option>
             </select>
             <button id="sortDirBtn" class="btn btn-ghost" title="Sort direction" aria-label="Sort direction">↑</button>
@@ -239,6 +242,9 @@
           <div class="form-grid">
             <div class="field"><label>Retail</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="retail" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
             <div class="field"><label>Paid</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="paid" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field"><label>Est. Value</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="market_value" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field"><label>Purchased</label><input name="purchase_date" type="date" /></div>
+            <div class="field"><label>Seller</label><input name="seller" list="sellerList" placeholder="Who you bought it from" /></div>
             <div class="field"><label>Discount</label><div id="percentOff" class="off-badge">—</div></div>
           </div>
         </section>
@@ -258,6 +264,8 @@
               </select>
             </div>
             <div class="field"><label>Asking Price</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="sale_price" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field"><label>Sold Date</label><input name="sold_date" type="date" /></div>
+            <div class="field"><label>Buyer</label><input name="buyer" list="buyerList" placeholder="Who you sold it to" /></div>
           </div>
         </section>
 
@@ -272,6 +280,19 @@
             <div class="field"><label>Gap Width</label><div class="affix-wrap post"><input name="gap_mm" type="number" step="0.01" placeholder="0" /><span class="affix-post">mm</span></div></div>
             <div class="field"><label>Bearing Size</label><input name="bearing_size" list="bearingList" placeholder="Size C / Size D" /></div>
             <div class="field"><label>Response Type</label><input name="response_type" list="responseList" placeholder="e.g. 19mm pads" /></div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.5l2.6 5.6 6.1.6-4.6 4 1.4 6L12 15.9 6.5 18.7l1.4-6-4.6-4 6.1-.6z"/></svg></span>
+            <div><h3>Edition &amp; Finish</h3><p>Collector details</p></div>
+          </header>
+          <div class="form-grid">
+            <div class="field"><label>Finish</label><input name="finish" list="finishList" placeholder="e.g. Blasted, Polished" /></div>
+            <div class="field"><label>Shape</label><input name="shape" list="shapeList" placeholder="e.g. Organic, H-Shape" /></div>
+            <div class="field"><label>Edition</label><input name="edition" placeholder="e.g. 1 of 50" /></div>
+            <div class="field"><label>Serial #</label><input name="serial_number" placeholder="Engraved serial, if any" /></div>
+            <div class="field span2"><label>Signature / Collab</label><input name="signature" placeholder="Signature player or maker collab" /></div>
           </div>
         </section>
 
@@ -338,6 +359,10 @@
   </datalist>
   <datalist id="materialList"></datalist>
   <datalist id="responseList"></datalist>
+  <datalist id="sellerList"></datalist>
+  <datalist id="buyerList"></datalist>
+  <datalist id="finishList"></datalist>
+  <datalist id="shapeList"></datalist>
 
   <!-- Detail (read-only) modal -->
   <div id="detailModal" class="modal hidden">
