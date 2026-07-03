@@ -10,7 +10,7 @@ import { parse } from 'csv-parse/sync';
 import AdmZip from 'adm-zip';
 import archiver from 'archiver';
 import { track as trackPackage, configuredCarriers } from './carriers.js';
-import db, { DB_PATH, openDatabase } from './db.js';
+import db, { DB_PATH, openDatabase, backfillUuids } from './db.js';
 
 // sharp (image thumbnails) is native; on some shared hosts it may not install.
 // Load it optionally so the app still boots and just serves full images.
@@ -245,8 +245,8 @@ const escHtml = (s) => String(s)
 app.get('/y/:id', (req, res) => {
   const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   res.type('html');
-  const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);
-  if (!row) return res.send(indexHtml); // unknown id — just load the app
+  const row = db.prepare('SELECT * FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  if (!row) return res.send(indexHtml); // unknown/deleted id — just load the app
 
   const y = decorate(row);
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
@@ -404,33 +404,35 @@ function publicSafe(y, editable) {
 
 app.get('/api/yoyos', (req, res) => {
   const editable = canEdit(req);
-  const rows = db.prepare('SELECT * FROM yoyos ORDER BY brand, model, color').all();
+  const rows = db.prepare('SELECT * FROM yoyos WHERE deleted_at IS NULL ORDER BY brand, model, color').all();
   res.json(rows.map((r) => publicSafe(decorate(r), editable)));
 });
 
 app.get('/api/yoyos/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
   res.json(publicSafe(decorate(row), canEdit(req)));
 });
 
 const WRITE_COLS_C = [...WRITE_COLS, 'custom'];
+// Columns written when creating a row. `uuid` is server-generated here (not part
+// of the client-writable set) so every yoyo gets a stable cross-device id.
+const INSERT_COLS = [...WRITE_COLS_C, 'uuid'];
+const INSERT_SQL = `INSERT INTO yoyos (${INSERT_COLS.join(', ')}) VALUES (${INSERT_COLS.map((c) => `@${c}`).join(', ')})`;
 
 app.post('/api/yoyos', (req, res) => {
   const y = sanitizeYoyo(req.body);
   const customObj = sanitizeCustom(req.body.custom);
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
-  const placeholders = WRITE_COLS_C.map((c) => `@${c}`).join(', ');
-  const info = db
-    .prepare(`INSERT INTO yoyos (${WRITE_COLS_C.join(', ')}) VALUES (${placeholders})`)
-    .run(y);
+  y.uuid = crypto.randomUUID();
+  const info = db.prepare(INSERT_SQL).run(y);
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(decorate(row));
 });
 
 app.put('/api/yoyos/:id', (req, res) => {
-  const existing = db.prepare('SELECT id FROM yoyos WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const y = sanitizeYoyo(req.body);
   const customObj = sanitizeCustom(req.body.custom);
@@ -445,20 +447,30 @@ app.put('/api/yoyos/:id', (req, res) => {
 });
 
 app.delete('/api/yoyos/:id', (req, res) => {
-  // Remove photo files from disk before deleting the rows.
+  // Only a live yoyo can be deleted; a soft-deleted one is already gone.
+  const existing = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  // Free the disk now (a tombstone doesn't need its photos) — remove both the
+  // full images and their thumbnails, then drop the photo rows.
   const photos = db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(req.params.id);
   for (const p of photos) {
     fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
+    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
   }
-  const info = db.prepare('DELETE FROM yoyos WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: 'Not found' });
+  // Keep the yoyo row as a tombstone (deleted_at set) so the deletion propagates
+  // to other devices on sync, rather than re-appearing from a device that still has it.
+  db.transaction(() => {
+    db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(req.params.id);
+    db.prepare("UPDATE yoyos SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  })();
   res.json({ ok: true });
 });
 
 // ---- API: photos ----
 
 app.post('/api/yoyos/:id/photos', upload.array('photos', 12), async (req, res) => {
-  const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ?').get(req.params.id);
+  const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!yoyo) return res.status(404).json({ error: 'Not found' });
 
   const maxRow = db
@@ -504,7 +516,7 @@ app.post('/api/photos/optimize', async (req, res) => {
 
 // Reorder a yoyo's photos (first = cover). Body: { ids: [photoId, ...] }.
 app.put('/api/yoyos/:id/photos/order', (req, res) => {
-  const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ?').get(req.params.id);
+  const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!yoyo) return res.status(404).json({ error: 'Not found' });
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n) => Number.isFinite(n)) : [];
   const upd = db.prepare('UPDATE photos SET sort_order = ? WHERE id = ? AND yoyo_id = ?');
@@ -628,14 +640,14 @@ app.get('/api/stats', (req, res) => {
               COALESCE(SUM(paid), 0)               AS total_paid,
               COALESCE(SUM(retail), 0)             AS total_retail,
               COALESCE(SUM(COALESCE(retail, 0) - COALESCE(paid, 0)), 0) AS total_saved
-       FROM yoyos`
+       FROM yoyos WHERE deleted_at IS NULL`
     )
     .get();
   const byBrand = db
     .prepare(
       `SELECT CASE WHEN brand = '' THEN 'Unknown' ELSE brand END AS brand,
               COUNT(*) AS count
-       FROM yoyos GROUP BY brand ORDER BY count DESC, brand`
+       FROM yoyos WHERE deleted_at IS NULL GROUP BY brand ORDER BY count DESC, brand`
     )
     .all();
   // Public viewers don't get financial / ownership totals.
@@ -716,7 +728,7 @@ function exportValue(header, y, base) {
 
 app.get('/api/export.csv', (req, res) => {
   if (!canEdit(req)) return res.status(403).json({ error: 'Log in to export.' });
-  const rows = db.prepare('SELECT * FROM yoyos ORDER BY brand, model, color').all();
+  const rows = db.prepare('SELECT * FROM yoyos WHERE deleted_at IS NULL ORDER BY brand, model, color').all();
   const base = `${req.protocol}://${req.get('host')}`;
 
   // Headers = built-in columns, then custom-field labels, then Photos + id.
@@ -776,14 +788,13 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
   // Custom-field columns are matched by their label.
   const customByHeader = new Map(loadFieldDefs().map((d) => [d.label.toLowerCase().trim(), d]));
 
-  const insertSql = db.prepare(
-    `INSERT INTO yoyos (${WRITE_COLS_C.join(', ')}) VALUES (${WRITE_COLS_C.map((c) => `@${c}`).join(', ')})`
-  );
-  const findSql = db.prepare('SELECT id FROM yoyos WHERE id = ?');
+  const insertSql = db.prepare(INSERT_SQL);
+  const findSql = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL');
   const getCustomSql = db.prepare('SELECT custom FROM yoyos WHERE id = ?');
   const matchByIdentity = db.prepare(
     `SELECT id FROM yoyos
-     WHERE lower(brand) = lower(@brand) AND lower(model) = lower(@model) AND lower(color) = lower(@color)`
+     WHERE lower(brand) = lower(@brand) AND lower(model) = lower(@model) AND lower(color) = lower(@color)
+       AND deleted_at IS NULL`
   );
 
   // Which columns does this CSV actually provide? Updates only touch those, so a
@@ -860,6 +871,7 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
         }
         updated++;
       } else {
+        y.uuid = crypto.randomUUID();
         insertSql.run(y);
         created++;
       }
@@ -943,6 +955,9 @@ app.post('/api/restore', uploadZip.single('file'), (req, res) => {
     for (const r of yoyoRows) insertFrom('yoyos', yoyoCols, r);
     for (const p of photoRows) insertFrom('photos', photoCols, p);
   })();
+  // A backup made before the uuid column existed restores rows without one —
+  // give those a stable id so the unique index holds and they can sync later.
+  backfillUuids(db);
 
   // Restore photo files (basename only — never trust paths inside the zip).
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });

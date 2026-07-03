@@ -2,6 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS yoyos (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid            TEXT,                       -- stable cross-device id for sync (unique index created in db.js)
 
   -- Identity
   brand           TEXT NOT NULL DEFAULT '',
@@ -54,6 +55,8 @@ CREATE TABLE IF NOT EXISTS yoyos (
   -- Bookkeeping
   favorite        INTEGER NOT NULL DEFAULT 0,
   retired         INTEGER NOT NULL DEFAULT 0, -- discontinued / limited run (paid may exceed retail)
+  deleted_at      TEXT,                       -- soft-delete tombstone; NULL = live. Deletes are kept as
+                                              -- tombstones so they propagate to other devices on sync (A2).
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

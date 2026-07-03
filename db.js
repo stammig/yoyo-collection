@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +96,31 @@ for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) 
   if (!yoyoCols.includes(col)) {
     db.exec(`ALTER TABLE yoyos ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
   }
+}
+
+// Soft-delete tombstone: deletes flip this instead of removing the row, so the
+// deletion can propagate to other devices on sync. See yoyo-ios-plan.md (A2).
+if (!yoyoCols.includes('deleted_at')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN deleted_at TEXT');
+}
+
+// Stable cross-device id for sync. Backfill any rows without one (pre-existing
+// rows, or rows restored from a backup made before this column existed), then
+// enforce uniqueness. See yoyo-ios-plan.md (Track A1).
+if (!yoyoCols.includes('uuid')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN uuid TEXT');
+}
+backfillUuids(db);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_yoyos_uuid ON yoyos(uuid)');
+
+// Assign a UUID to every yoyo that lacks one. Exported so the restore endpoint
+// can re-run it after importing rows from an older backup.
+export function backfillUuids(database) {
+  const rows = database.prepare("SELECT id FROM yoyos WHERE uuid IS NULL OR uuid = ''").all();
+  if (!rows.length) return 0;
+  const setUuid = database.prepare('UPDATE yoyos SET uuid = ? WHERE id = ?');
+  database.transaction((rs) => { for (const r of rs) setUuid.run(crypto.randomUUID(), r.id); })(rows);
+  return rows.length;
 }
 
 export default db;
