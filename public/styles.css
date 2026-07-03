@@ -220,7 +220,7 @@ body:not(.embed) .app-shell { min-height: 100vh; }
 }
 .btn:hover { background: var(--surface-2); }
 .btn:active { transform: translateY(0.5px); }
-.btn-primary { background: var(--accent); border-color: transparent; color: var(--on-accent); box-shadow: 0 1px 2px rgba(94,92,230,0.3); }
+.btn-primary { background: var(--accent); border-color: transparent; color: var(--on-accent); box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text); }
 .btn-ghost:hover { background: var(--hover); }
@@ -385,9 +385,10 @@ body.list-edit .data-table tbody tr { cursor: default; }
    ============================================================ */
 /* Card "more" button next to the favorite star */
 .card-actions { display: flex; gap: 6px; }
-.card-more-btn { border: none; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: rgba(20,20,22,0.5); color: #fff; display: flex; align-items: center; justify-content: center; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-.card-more-btn svg { width: 15px; height: 15px; }
-.card-more-btn:hover { background: rgba(20,20,22,0.72); }
+/* Circular overlay buttons in a card's top corner (favorite + more-actions) share one look. */
+.card-more-btn, .card-fav-btn { border: none; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: rgba(20,20,22,0.5); color: #fff; display: flex; align-items: center; justify-content: center; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); transition: background 0.1s ease; }
+.card-more-btn svg, .card-fav-btn svg { width: 15px; height: 15px; }
+.card-more-btn:hover, .card-fav-btn:hover { background: rgba(20,20,22,0.72); }
 /* On touch devices there's no hover — keep the actions visible */
 @media (hover: none) { .card-actions { opacity: 1 !important; transform: none !important; } }
 
@@ -473,10 +474,7 @@ body.list-edit .data-table tbody tr { cursor: default; }
 
 .card-actions { position: absolute; top: 8px; right: 8px; z-index: 3; opacity: 0; transform: translateY(-2px); transition: opacity 0.12s ease, transform 0.12s ease; }
 .card:hover .card-actions { opacity: 1; transform: none; }
-.card-fav-btn { border: none; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: rgba(20,20,22,0.5); color: #fff; display: flex; align-items: center; justify-content: center; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); transition: background 0.1s ease; }
-.card-fav-btn svg { width: 15px; height: 15px; }
 .card-fav-btn.on { color: var(--gold); }
-.card-fav-btn:hover { background: rgba(20,20,22,0.72); }
 body.read-only .card-actions { display: none; }
 
 .context-menu { position: fixed; z-index: 200; min-width: 176px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 5px; }
@@ -664,7 +662,7 @@ body.read-only .card-actions { display: none; }
 .tile small { font-size: 0.64rem; color: var(--muted); }
 .tile:hover { border-color: var(--accent); }
 .tile:active { transform: translateY(0.5px); }
-.tile.active { background: var(--accent); border-color: transparent; color: var(--on-accent); box-shadow: 0 1px 5px rgba(94,92,230,0.35); }
+.tile.active { background: var(--accent); border-color: transparent; color: var(--on-accent); box-shadow: 0 1px 5px color-mix(in srgb, var(--accent) 35%, transparent); }
 .tile.active small { color: rgba(255,255,255,0.82); }
 
 .toggles { flex-direction: row; gap: 24px; align-items: center; }
@@ -696,9 +694,9 @@ body.read-only .card-actions { display: none; }
 .cover-badge { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.55); color: #fff; font-size: 0.62rem; text-align: center; padding: 2px; letter-spacing: 0.03em; }
 .photo-del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; cursor: pointer; font-size: 0.7rem; }
 
-.autofill-status { margin: 10px 22px 0; padding: 10px 13px; border-radius: var(--radius); font-size: 0.82rem; background: var(--surface-2); color: var(--muted); }
-.autofill-status.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
-.autofill-status.warn { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold); }
+.status-banner { margin: 10px 22px 0; padding: 10px 13px; border-radius: var(--radius); font-size: 0.82rem; background: var(--surface-2); color: var(--muted); }
+.status-banner.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.status-banner.warn { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold); }
 
 /* ============================================================
    Detail
@@ -738,7 +736,7 @@ body.read-only .card-actions { display: none; }
 /* ============================================================
    Settings: photos + custom fields
    ============================================================ */
-.blogo-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.settings-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 
 .field-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .field-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; background: var(--surface-2); border: 1px solid var(--separator); border-radius: 9px; }
@@ -896,7 +894,7 @@ input:focus-visible, textarea:focus-visible, .select:focus-visible { outline: no
 .confirm-body { padding: 22px 22px 8px; }
 .confirm-body h2 { font-size: 1.05rem; font-weight: 650; margin-bottom: 7px; letter-spacing: -0.01em; }
 .confirm-body p { margin: 0; color: var(--muted); font-size: 0.86rem; line-height: 1.5; }
-.btn-danger-solid { background: var(--danger); color: #fff; border-color: transparent; box-shadow: 0 1px 2px rgba(224,53,43,0.3); }
+.btn-danger-solid { background: var(--danger); color: #fff; border-color: transparent; box-shadow: 0 1px 2px color-mix(in srgb, var(--danger) 30%, transparent); }
 .btn-danger-solid:hover { background: var(--danger); filter: brightness(1.06); }
 
 /* Skeleton loading */

@@ -191,11 +191,18 @@ app.use((req, res, next) => {
 
 // ---- File uploads (photos) ----
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+// Stored filenames get their extension from this fixed table, keyed by the
+// already-validated mimetype — NOT from the client-supplied original filename.
+// The original filename is attacker-controlled and can contain arbitrary
+// characters (quotes, angle brackets, etc.); deriving the extension from it
+// would let a crafted upload name inject those characters into a filename
+// that later gets embedded in HTML (photo URLs are rendered client-side).
+const EXT_BY_MIME = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    const ext = EXT_BY_MIME[file.mimetype] || '.jpg';
     cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
   },
 });

@@ -7,6 +7,8 @@ let filters = {
   paidMin: null, paidMax: null, retailMin: null, retailMax: null, weightMin: null, weightMax: null,
 };
 let editingId = null;
+let formGen = 0;             // bumped whenever the add/edit form's target changes (open/close/switch);
+                             // an in-flight submit checks this to avoid clobbering UI state the user has since moved on from
 let detailId = null;        // id currently shown in the read-only detail modal
 let shareMode = false;      // arrived via a /y/:id share link (focused single-yoyo view)
 let cameFromDetail = false; // whether the edit form was opened from the detail view
@@ -202,8 +204,12 @@ async function api(url, opts = {}) {
 }
 
 // ---- Load + render ----
+let loadGen = 0; // guards against out-of-order responses: only the latest in-flight call may apply its result
 async function loadAll() {
-  yoyos = await api('/api/yoyos');
+  const gen = ++loadGen;
+  const data = await api('/api/yoyos');
+  if (gen !== loadGen) return; // a newer loadAll() has since started — this one is stale, drop it
+  yoyos = data;
   refreshDatalists();
   refreshCurrentView();
 }
@@ -1864,6 +1870,7 @@ let addAnother = false;   // set by "Save & add another"
 let lastBrand = '';       // carried over between add-another saves
 function openAdd(prefillBrand = '') {
   editingId = null;
+  formGen++;
   cameFromDetail = false;
   $('#modalTitle').textContent = 'Add a yoyo';
   $('#saveBtn').textContent = 'Add to collection';
@@ -1883,6 +1890,7 @@ function openEdit(id, fromDetail = false) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
   editingId = id;
+  formGen++;
   cameFromDetail = fromDetail;
   $('#detailModal').classList.add('hidden'); // hide detail while editing
   $('#modalTitle').textContent = `${y.brand} ${y.model}`.trim() || 'Edit Yoyo';
@@ -1971,7 +1979,7 @@ function renderPhotoStrip(photos) {
   photoStrip.innerHTML =
     photos.map((p, i) => `
       <div class="photo-thumb" draggable="true" data-pid="${p.id}">
-        <img src="${esc(p.thumbUrl || p.url)}" alt="" data-full="${p.url}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${p.url}'" />
+        <img src="${esc(p.thumbUrl || p.url)}" alt="" data-full="${esc(p.url)}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />
         ${i === 0 ? '<span class="cover-badge">Cover</span>' : ''}
         <button type="button" class="photo-del" data-photo="${p.id}" title="Remove photo">✕</button>
         <div class="photo-move">
@@ -2078,6 +2086,7 @@ function closeModal() {
   modal.classList.add('hidden');
   const id = editingId;
   editingId = null;
+  formGen++;
   // If the form was opened from the detail view, return to it.
   if (id && cameFromDetail) { cameFromDetail = false; openDetail(id); }
 }
@@ -2085,13 +2094,13 @@ function closeModal() {
 // ---- Form submit ----
 form.addEventListener('input', (e) => {
   if (e.target.name === 'retail' || e.target.name === 'paid') updatePercentOff();
-  e.target.classList?.remove('ai-filled'); // it's yours once you touch it
   updateHero();
 });
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (demoGuard()) return;
+  const myGen = formGen; // snapshot: detects if the form's target changes while this save is in flight
   const data = Object.fromEntries(new FormData(form).entries());
   data.in_hand = form.in_hand.checked;
   data.favorite = form.favorite.checked;
@@ -2099,21 +2108,30 @@ form.addEventListener('submit', async (e) => {
   data.custom = collectCustom();
   delete data.id;
 
-  const isNew = !editingId;
+  const targetId = editingId; // capture now — editingId may be reassigned while we await below
+  const isNew = !targetId;
   const another = addAnother; addAnother = false;
   try {
     let saved;
-    if (editingId) {
-      saved = await api(`/api/yoyos/${editingId}`, {
+    if (targetId) {
+      saved = await api(`/api/yoyos/${targetId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
       });
     } else {
       saved = await api('/api/yoyos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
       });
-      editingId = saved.id;
+      // Only claim editingId if nothing else has taken over the form in the
+      // meantime (e.g. the user closed this form and opened a different yoyo's
+      // edit while this POST was in flight) — otherwise we'd silently redirect
+      // that other, currently-open edit session onto this new yoyo's id.
+      if (formGen === myGen) editingId = saved.id;
     }
     await loadAll();
+    // The user may have closed this form, or moved on to editing something else,
+    // while the save was in flight. The data's already saved either way — just
+    // don't yank their current screen back to reflect this stale submission.
+    if (formGen !== myGen) return;
     if (isNew && another) {
       lastBrand = (data.brand || '').trim();
       editingId = null;
@@ -2123,11 +2141,10 @@ form.addEventListener('submit', async (e) => {
       openEdit(editingId); // new yoyo: stay in the form to add photos right away
       toast('Saved — add photos below, or close.', 'ok');
     } else {
-      const id = editingId;
       modal.classList.add('hidden');
       editingId = null;
       cameFromDetail = false;
-      openDetail(id); // edited existing: show the updated detail view
+      openDetail(targetId); // edited existing: show the updated detail view
     }
   } catch (err) {
     toast(err.message, 'error');
@@ -2605,16 +2622,16 @@ $('#optimizePhotosBtn').addEventListener('click', async () => {
   const btn = $('#optimizePhotosBtn');
   const status = $('#optimizeStatus');
   btn.disabled = true;
-  status.className = 'autofill-status';
+  status.className = 'status-banner';
   status.classList.remove('hidden');
   status.textContent = 'Generating thumbnails… this can take a minute.';
   try {
     const r = await api('/api/photos/optimize', { method: 'POST' });
-    status.className = 'autofill-status ok';
+    status.className = 'status-banner ok';
     status.textContent = `Done — ${r.processed} optimized, ${r.skipped} already done${r.failed ? `, ${r.failed} failed` : ''} (of ${r.total}).`;
     await loadAll();
   } catch (err) {
-    status.className = 'autofill-status warn';
+    status.className = 'status-banner warn';
     status.textContent = 'Failed: ' + err.message;
   } finally {
     btn.disabled = false;

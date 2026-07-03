@@ -87,7 +87,7 @@
           <section class="stats" id="stats"></section>
 
           <section class="controls">
-            <input type="search" id="search" class="search" placeholder="Search brand, model, color, material…" />
+            <input type="search" id="search" class="search" aria-label="Search collection" placeholder="Search brand, model, color, material…" />
             <select id="sort" class="select">
               <option value="brand">Sort: Brand</option>
               <option value="model">Sort: Model</option>
@@ -183,7 +183,7 @@
   <!-- Edit / Add modal -->
   <div id="modal" class="modal hidden">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head">
         <h2 id="modalTitle">Add Yoyo</h2>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
@@ -367,7 +367,7 @@
   <!-- Detail (read-only) modal -->
   <div id="detailModal" class="modal hidden">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
       <div class="modal-head">
         <h2 id="detailTitle">Yoyo</h2>
         <div class="detail-nav">
@@ -391,9 +391,9 @@
   <!-- Settings (admin panel) modal -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card modal-sm" role="dialog" aria-modal="true">
+    <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-head">
-        <h2>Settings</h2>
+        <h2 id="settingsTitle">Settings</h2>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
       </div>
       <div class="form">
@@ -413,10 +413,10 @@
             <div><h3>Photos &amp; bandwidth</h3><p>Generate thumbnails to cut data use</p></div>
           </header>
           <p class="hint">Your photos are shown as small thumbnails in the grid; the full image loads only when zoomed. Run this once after importing photos.</p>
-          <div class="blogo-toolbar">
+          <div class="settings-toolbar">
             <button type="button" id="optimizePhotosBtn" class="btn btn-primary">Optimize photos</button>
           </div>
-          <div id="optimizeStatus" class="autofill-status hidden"></div>
+          <div id="optimizeStatus" class="status-banner hidden"></div>
         </section>
 
         <section class="form-section" id="fieldsAdmin">
@@ -457,9 +457,9 @@
   <!-- Login modal -->
   <div id="loginModal" class="modal hidden">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card modal-sm" role="dialog" aria-modal="true">
+    <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
       <div class="modal-head">
-        <h2>Log in</h2>
+        <h2 id="loginTitle">Log in</h2>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
       </div>
       <form id="loginForm" class="form">
