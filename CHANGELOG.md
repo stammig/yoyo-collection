@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-03 (3)
+- **Expand the dropdown-value audit against the real collection** — the
+  earlier pass only saw a stale local dev copy (140 rows); re-ran it against
+  a live CSV export (218 rows) and found much more: `6061 Aluminum`/
+  `6061 Aluminium`/`6061AL` → `6061 AL`, `7068/7075 Aluminum` → `7068/7075 AL`,
+  `POM` → `Delrin` (same material, genericized name), `PC` → `Polycarbonate`,
+  a `Size C` bearing entry that just spelled out its own spec, eight more
+  `19mm Slim Pad` phrasings, two more `One Drop Flow Groove` phrasings, and
+  `Monometal` → `MN` (composition is a fixed BI/MN/TRI picker in the UI, so a
+  spelled-out value could only get in via CSV import). Left several
+  judgment-call entries un-merged rather than guess: ambiguous/ungraded
+  values (`Aluminum` alone, `SS, AL`), values with a real distinguishing
+  detail a merge would erase (`Used/Minor Damage`, `Size C Center Trac`,
+  `Slim Pad Size D`), and a few verbose one-off construction descriptions
+  that may describe different specific yoyos.
+
 ## 2026-07-03 (2)
 - **Fix Add-form field carryover + mobile layout overflow, dedupe dropdown
   values** — three bugs reported after real-world use:

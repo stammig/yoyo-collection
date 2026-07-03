@@ -12,18 +12,36 @@ import fs from 'node:fs';
 const MERGES = [
   // Body material — collapse spelling/spacing variants onto "<grade> AL[, alloy]".
   ['body_material', '6061 Aluminum', '6061 AL'],
+  ['body_material', '6061 Aluminium', '6061 AL'],       // British spelling
   ['body_material', '6061AL', '6061 AL'],
+  ['body_material', '7068 Aluminum', '7068 AL'],
+  ['body_material', '7075 Aluminum', '7075 AL'],
   ['body_material', '6061 AL, Stainless Steel', '6061 AL, SS'],
-  ['body_material', 'Al, Delrin', 'AL, Delrin'],
+  ['body_material', 'Al, Delrin', 'AL, Delrin'],          // casing
+  ['body_material', 'POM', 'Delrin'],                     // POM is Delrin's genericized name
+  ['body_material', 'PC', 'Polycarbonate'],               // abbreviation, standalone entries only
 
   // Bearing size — collapse onto the "Size C" / "Size D" convention.
   ['bearing_size', 'Konkave', 'Size C'],
+  ['bearing_size', 'Size C (.250 x .500 x .187)', 'Size C'], // that's just Size C's own spec
 
-  // Response type — collapse spelling/pluralization variants.
-  ['response_type', '19mm Slim Pads', '19mm Slim Pad'],
+  // Response type — collapse spelling/pluralization/phrasing variants.
   ['response_type', '19mm pads', '19mm Pads'],
+  ['response_type', '19mm Standard', '19mm Pads'],
+  ['response_type', '19mm Slim Pads', '19mm Slim Pad'],
+  ['response_type', '19mm slim pad', '19mm Slim Pad'],
+  ['response_type', '19mm slim pads', '19mm Slim Pad'],
+  ['response_type', 'Slim 19mm', '19mm Slim Pad'],
+  ['response_type', 'Slim Pad 19mm OD', '19mm Slim Pad'],
+  ['response_type', 'Slim Pad Size 19mm OD', '19mm Slim Pad'],
   ['response_type', 'CLYW Snow Tires', 'CLYW Snow Tire'],
   ['response_type', 'D-Size Pad', 'Size D Pad'],
+  ['response_type', 'One Drop Standard Flow Groove Pad', 'One Drop Flow Groove'],
+  ['response_type', 'Original Flow Groove', 'One Drop Flow Groove'],
+  ['response_type', 'Stratos pads', 'Stratos Pads'],
+
+  // Composition — the tile picker only offers BI/MN/TRI; collapse the spelled-out form.
+  ['composition', 'Monometal', 'MN'],
 ];
 
 const sqlEsc = (v) => `'${String(v).replace(/'/g, "''")}'`;
