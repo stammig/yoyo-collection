@@ -42,6 +42,10 @@
           <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5.6l6.4 6.4-5.6 5.6L2 7.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="5.1" cy="5.1" r="1.1"/></svg>
           <span>For Sale</span>
         </button>
+        <button class="nav-item hidden" data-view="sold" id="navSold">
+          <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Sold</span>
+        </button>
         <button class="nav-item" data-view="insights">
           <svg class="nav-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="8" width="3.2" height="6.5" rx="1"/><rect x="6.4" y="4.5" width="3.2" height="10" rx="1"/><rect x="11.3" y="1.5" width="3.2" height="13" rx="1"/></svg>
           <span>Insights</span>
@@ -177,6 +181,9 @@
         <!-- ============ For Sale ============ -->
         <section id="viewSale" class="view hidden"></section>
 
+        <!-- ============ Sold ============ -->
+        <section id="viewSold" class="view hidden"></section>
+
         <!-- ============ Insights ============ -->
         <section id="viewInsights" class="view hidden"></section>
       </div>
@@ -271,6 +278,14 @@
               </select>
             </div>
             <div class="field"><label>Asking Price</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="sale_price" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
+            <div class="field span2 hidden" id="saleTypeRow">
+              <label>Sale Type</label>
+              <div class="seg" id="saleTypeSeg" role="group" aria-label="Sale type">
+                <button type="button" class="seg-btn active" data-sale-type="cash">Cash sale</button>
+                <button type="button" class="seg-btn" data-sale-type="trade">Trade</button>
+              </div>
+            </div>
+            <div class="field hidden" id="tradeValueField"><label>Trade Value</label><div class="affix-wrap pre"><span class="affix-pre">$</span><input name="trade_value" type="number" step="0.01" min="0" placeholder="0.00" /></div></div>
             <div class="field"><label>Sold Date</label><input name="sold_date" type="date" /></div>
             <div class="field"><label>Buyer</label><input name="buyer" list="buyerList" placeholder="Who you sold it to" /></div>
           </div>

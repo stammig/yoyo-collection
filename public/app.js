@@ -98,7 +98,7 @@ const SVG = {
 };
 
 // Hidden from public viewers (financial, shipping, ownership status).
-const SENSITIVE = new Set(['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value']);
+const SENSITIVE = new Set(['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value']);
 
 // View prefs (persisted to localStorage).
 const DEFAULT_VIEW = {
@@ -128,6 +128,7 @@ const FIELD_DEFS = [
   { key: 'percent_off', label: '% Off', fmt: (v) => (v == null ? '' : v + '%'), num: true },
   { key: 'sale_status', label: 'Sale' },
   { key: 'sale_price', label: 'Asking', fmt: money, num: true },
+  { key: 'trade_value', label: 'Trade Value', fmt: money, num: true },
   { key: 'sold_date', label: 'Sold Date' },
   { key: 'buyer', label: 'Buyer' },
   { key: 'weight_g', label: 'Weight', fmt: (v) => (v ? v + ' g' : ''), num: true },
@@ -180,9 +181,10 @@ const defaultDir = (key) => (NUMERIC_KEYS.has(key) || FIELD_BY_KEY[key]?.num || 
 const DETAIL_GROUPS = [
   ['Overview', ['color', 'composition', 'body_material', 'condition']],
   ['Pricing', ['retail', 'paid', 'percent_off']],
+  ['Sale', ['sale_status', 'sale_price', 'trade_value', 'sold_date', 'buyer']],
   ['Specs', ['weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'bearing_size', 'response_type']],
   ['Edition & Finish', ['finish', 'shape', 'edition', 'serial_number', 'signature']],
-  ['Acquisition', ['release_date', 'purchase_date', 'seller', 'sold_date', 'buyer', 'tracking', 'eta']],
+  ['Acquisition', ['release_date', 'purchase_date', 'seller', 'tracking', 'eta']],
 ];
 
 // ---- DOM ----
@@ -665,10 +667,10 @@ function buildFieldsPanel() {
 // ============================================================
 //  View router (Collection / Arrivals / Insights)
 // ============================================================
-// Switches between the Collection / Arrivals / For Sale / Insights views,
-// remembering the choice and rendering the newly-active one.
+// Switches between the Collection / Arrivals / For Sale / Sold / Insights
+// views, remembering the choice and rendering the newly-active one.
 function setView(v) {
-  if (v === 'arrivals' && !canEditState) v = 'collection';
+  if ((v === 'arrivals' || v === 'sold') && !canEditState) v = 'collection';
   currentView = v;
   try { localStorage.setItem('yoyoTab', v); } catch { /* ignore */ }
   document.querySelectorAll('#sidebarNav .nav-item').forEach((b) =>
@@ -676,11 +678,13 @@ function setView(v) {
   $('#viewCollection').classList.toggle('hidden', v !== 'collection');
   $('#viewArrivals').classList.toggle('hidden', v !== 'arrivals');
   $('#viewSale').classList.toggle('hidden', v !== 'sale');
+  $('#viewSold').classList.toggle('hidden', v !== 'sold');
   $('#viewInsights').classList.toggle('hidden', v !== 'insights');
-  $('#viewTitle').textContent = v === 'arrivals' ? 'Arrivals' : v === 'sale' ? 'For Sale' : v === 'insights' ? 'Insights' : 'Collection';
+  $('#viewTitle').textContent = v === 'arrivals' ? 'Arrivals' : v === 'sale' ? 'For Sale' : v === 'sold' ? 'Sold' : v === 'insights' ? 'Insights' : 'Collection';
   updateToolbar();
   if (v === 'arrivals') renderArrivals();
   else if (v === 'sale') renderSale();
+  else if (v === 'sold') renderSold();
   else if (v === 'insights') renderInsights();
   else render();
 }
@@ -705,7 +709,7 @@ function buildPayload(y) {
     'sale_status', 'purchase_date', 'sold_date', 'seller', 'buyer',
     'finish', 'shape', 'edition', 'serial_number', 'signature']
     .forEach((k) => { p[k] = y[k] ?? ''; });
-  ['retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'market_value']
+  ['retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'trade_value', 'market_value']
     .forEach((k) => { p[k] = y[k] ?? ''; });
   p.in_hand = !!y.in_hand;
   p.favorite = !!y.favorite;
@@ -1396,6 +1400,57 @@ function renderSale() {
 }
 
 // ============================================================
+//  Sold (owner-only history of completed sales/trades)
+// ============================================================
+// How much a completed sale actually brought in. A trade takes precedence
+// over an asking price left over from when the yoyo was listed — a yoyo
+// can't be both a cash sale and a trade.
+function recoveredAmount(y) {
+  if (y.sale_status !== 'Sold') return 0;
+  return y.trade_value != null ? y.trade_value : (y.sale_price != null ? y.sale_price : 0);
+}
+// One row in the Sold list: photo, sold date/buyer, and either the cash
+// amount or the trade's valuation.
+function soldCardHTML(y) {
+  const thumb = y.photos[0]
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    : '<span class="placeholder"></span>';
+  const isTrade = y.trade_value != null;
+  const amount = recoveredAmount(y);
+  const priceLine = amount > 0
+    ? `<div class="sale-price">${money(amount)}${isTrade ? ' <span class="sale-or">traded</span>' : ''}</div>`
+    : `<div class="sale-price">${isTrade ? 'Traded' : '—'}</div>`;
+  const sub = [y.sold_date, y.buyer].filter(Boolean).join(' · ');
+  return `<article class="sale-card" data-id="${y.id}" role="button" tabindex="0" aria-label="${esc(y.brand)} ${esc(y.model)}">
+      <div class="sale-photo">${thumb}<span class="sale-badge ${isTrade ? 'trade' : 'sale'}">${isTrade ? 'Traded' : 'Sold'}</span></div>
+      <div class="sale-body">
+        <div class="sale-brand">${esc(y.brand)}</div>
+        <div class="sale-model">${esc(y.model)}</div>
+        ${sub ? `<div class="sale-sub">${esc(sub)}</div>` : ''}
+        ${priceLine}
+      </div>
+    </article>`;
+}
+// Renders the owner-only Sold view: every yoyo marked Sold, most recent
+// first, with a running total of what was recovered across all of them.
+function renderSold() {
+  const wrap = $('#viewSold');
+  const items = yoyos.filter((y) => y.sale_status === 'Sold')
+    .sort((a, b) => String(b.sold_date || '').localeCompare(String(a.sold_date || '')));
+  const recovered = items.reduce((a, y) => a + recoveredAmount(y), 0);
+  const body = items.length
+    ? `<p class="sale-intro">${items.length} sold · ${money0(recovered)} recovered</p>`
+      + `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`
+    : '<div class="insight-note">Nothing marked as sold yet.</div>';
+  wrap.innerHTML = body;
+  wrap.querySelectorAll('.sale-card[data-id]').forEach((el) => {
+    const id = Number(el.dataset.id);
+    el.addEventListener('click', () => openDetail(id));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id); } });
+  });
+}
+
+// ============================================================
 //  Insights (metrics, standouts, charts)
 // ============================================================
 function maxBy(arr, key) { let best = null; for (const y of arr) { const v = y[key]; if (v == null) continue; if (!best || v > best[key]) best = y; } return best; }
@@ -1438,6 +1493,9 @@ function renderInsights() {
   const avgDiscount = discounts.length ? discounts.reduce((a, b) => a + b, 0) / discounts.length : null;
   const paids = yoyos.map((y) => y.paid).filter((v) => v != null);
   const avgPaid = paids.length ? paids.reduce((a, b) => a + b, 0) / paids.length : null;
+  const soldYoyos = yoyos.filter((y) => y.sale_status === 'Sold');
+  const recovered = soldYoyos.reduce((a, y) => a + recoveredAmount(y), 0);
+  const netSpent = totalPaid - recovered;
 
   let metrics = metricCard(String(count), 'Yoyos');
   if (admin) {
@@ -1448,6 +1506,10 @@ function renderInsights() {
     metrics += metricCard(money0(saved), 'Saved', 'green');
     if (avgDiscount != null) metrics += metricCard(`${Math.round(avgDiscount)}%`, 'Avg discount', 'green');
     if (avgPaid != null) metrics += metricCard(money0(avgPaid), 'Avg paid');
+    if (soldYoyos.length) {
+      metrics += metricCard(money0(recovered), 'Recovered', 'green');
+      metrics += metricCard(money0(netSpent), 'Net spent');
+    }
   } else {
     metrics += metricCard(String(new Set(yoyos.map((y) => y.brand).filter(Boolean)).size), 'Brands');
   }
@@ -1670,7 +1732,7 @@ const CARD_PRICE_KEYS = ['paid', 'retail', 'percent_off'];      // rendered as a
 // Keys handled specially — never rendered as a generic spec row.
 const CARD_SPECIAL_KEYS = new Set([
   ...CARD_CHIP_KEYS, ...CARD_PRICE_KEYS,
-  'favorite', 'retired', 'sale_status', 'sale_price', 'in_hand', 'description',
+  'favorite', 'retired', 'sale_status', 'sale_price', 'trade_value', 'in_hand', 'description',
 ]);
 
 // Wrap a string to at most maxLines lines for the (already-set) ctx font,
@@ -2003,6 +2065,7 @@ function openAdd() {
   renderCustomFields({});
   updatePercentOff();
   syncTiles();
+  setSaleType('cash');
   updateHero();
   showModal();
 }
@@ -2032,6 +2095,7 @@ function openEdit(id, fromDetail = false) {
   renderCustomFields(y.custom || {});
   updatePercentOff();
   syncTiles();
+  setSaleType(y.trade_value != null ? 'trade' : 'cash');
   updateHero();
   showModal();
 }
@@ -2076,6 +2140,20 @@ function updateHero() {
     `</div>`;
 }
 
+// Shows the Cash/Trade toggle only once Sale Status is "Sold", and the Trade
+// Value field only when "Trade" is the selected type.
+function syncSaleType() {
+  const isSold = form.sale_status.value === 'Sold';
+  $('#saleTypeRow').classList.toggle('hidden', !isSold);
+  const isTrade = $('#saleTypeSeg').querySelector('.seg-btn.active')?.dataset.saleType === 'trade';
+  $('#tradeValueField').classList.toggle('hidden', !(isSold && isTrade));
+}
+// Sets which Cash/Trade segment is active and refreshes field visibility.
+function setSaleType(type) {
+  $('#saleTypeSeg').querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.saleType === type));
+  syncSaleType();
+}
+
 // Highlights the active tile-picker option (e.g. composition/shape) to match
 // its hidden form field's current value.
 function syncTiles() {
@@ -2097,6 +2175,15 @@ $('#yoyoForm').addEventListener('click', (e) => {
   syncTiles();
   updateHero();
 });
+
+// Sale-type toggle (Cash sale / Trade) — only relevant once Sale Status is
+// Sold; picking Trade reveals the Trade Value field.
+$('#saleTypeSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  setSaleType(btn.dataset.saleType);
+});
+form.sale_status.addEventListener('change', syncSaleType);
 
 // Renders the form's photo thumbnail strip, with per-photo remove/reorder
 // controls and a "cover" badge on the first one.
@@ -2663,7 +2750,8 @@ async function loadConfig() {
   $('#loginBtn').classList.toggle('hidden', !c.loginEnabled || c.loggedIn);
   $('#logoutBtn').classList.toggle('hidden', !c.loggedIn);
   $('#navArrivals').classList.toggle('hidden', !canEditState); // Arrivals is owner-only
-  if (!canEditState && currentView === 'arrivals') setView('collection');
+  $('#navSold').classList.toggle('hidden', !canEditState); // Sold history is owner-only
+  if (!canEditState && (currentView === 'arrivals' || currentView === 'sold')) setView('collection');
   updateToolbar();
   renderSmartViews();
   applySortVisibility();

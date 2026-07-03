@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS yoyos (
   -- For sale / trade (shown on the public For Sale page)
   sale_status     TEXT NOT NULL DEFAULT '',   -- '' | For Sale | For Trade | For Sale or Trade | Sold
   sale_price      REAL,                       -- asking price
+  trade_value     REAL,                       -- value received if sold via trade (owner-only); NULL = cash sale
   sold_date       TEXT NOT NULL DEFAULT '',   -- when it sold (ISO date, owner-only)
   buyer           TEXT NOT NULL DEFAULT '',   -- who you sold it to (owner-only)
 

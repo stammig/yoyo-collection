@@ -305,7 +305,7 @@ const TEXT_FIELDS = [
   'finish', 'shape', 'edition', 'serial_number', 'signature',
 ];
 const NUMBER_FIELDS = [
-  'retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'market_value',
+  'retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price', 'trade_value', 'market_value',
 ];
 const BOOL_FIELDS = ['in_hand', 'favorite', 'retired'];
 const WRITE_COLS = [...TEXT_FIELDS, ...NUMBER_FIELDS, ...BOOL_FIELDS];
@@ -419,7 +419,7 @@ function growSelectOptions(customObj) {
 }
 
 // Fields hidden from anyone who can't edit (public/read-only view).
-const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value'];
+const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value'];
 function publicSafe(y, editable) {
   if (editable) return y;
   const out = { ...y };

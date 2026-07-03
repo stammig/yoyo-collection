@@ -82,6 +82,9 @@ if (!yoyoCols.includes('sale_status')) {
 if (!yoyoCols.includes('sale_price')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN sale_price REAL');
 }
+if (!yoyoCols.includes('trade_value')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN trade_value REAL');
+}
 if (!yoyoCols.includes('purchase_date')) {
   db.exec("ALTER TABLE yoyos ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''");
 }

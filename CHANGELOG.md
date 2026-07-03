@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-03 (4)
+- **Add sold-yoyo tracking: new Sold tab, trade valuation, net-spend stats** —
+  a new owner-only "Sold" tab lists every yoyo marked Sold (most recent first,
+  with a running "N sold · $recovered" total) — no manual bookkeeping, it's
+  just a live filter over `sale_status`. Added a `trade_value` column
+  (owner-only, like `paid`/`retail`) to record what a *trade* brought in,
+  distinct from `sale_price` (the cash amount / public asking price): editing
+  a yoyo's Sale Status to "Sold" reveals a Cash sale/Trade toggle inline in
+  the form, and picking Trade reveals the Trade Value field. Insights gained
+  two new metrics, "Recovered" and "Net spent" (`total paid − recovered`),
+  shown once at least one yoyo is sold. The detail view's scattered sale
+  fields (`sale_status`/`sale_price`/`sold_date`/`buyer`) are now one
+  coherent "Sale" section instead of `sold_date`/`buyer` living oddly under
+  "Acquisition". `trade_value` is intentionally left out of the CSV export —
+  `sale_status`/`sale_price` were never in it either (a pre-existing gap from
+  before the For Sale feature), so this doesn't introduce a new inconsistency.
+
 ## 2026-07-03 (3)
 - **Expand the dropdown-value audit against the real collection** — the
   earlier pass only saw a stale local dev copy (140 rows); re-ran it against
