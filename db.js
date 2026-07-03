@@ -1,3 +1,8 @@
+// SQLite access layer: a thin better-sqlite3-compatible wrapper around Node's
+// built-in `node:sqlite`, plus schema bootstrap and column migrations that run
+// once at startup. Every migration below is an idempotent `ALTER TABLE ...
+// IF NOT EXISTS`-style check, so this file is safe to run against a database
+// from any earlier version of the app — new columns just get added in place.
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -98,15 +103,19 @@ for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) 
   }
 }
 
-// Soft-delete tombstone: deletes flip this instead of removing the row, so the
-// deletion can propagate to other devices on sync. See yoyo-ios-plan.md (A2).
+// Soft-delete tombstone: DELETE /api/yoyos/:id sets this instead of removing
+// the row (see server.js), so a future sync can propagate the deletion to
+// other devices instead of a stale copy resurrecting it. Every read filters
+// `WHERE deleted_at IS NULL`.
 if (!yoyoCols.includes('deleted_at')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN deleted_at TEXT');
 }
 
-// Stable cross-device id for sync. Backfill any rows without one (pre-existing
-// rows, or rows restored from a backup made before this column existed), then
-// enforce uniqueness. See yoyo-ios-plan.md (Track A1).
+// Stable, client-independent id for every yoyo — the anchor a future sync
+// protocol would key off of, since auto-increment `id` values collide across
+// devices that create rows offline. Backfill any rows without one
+// (pre-existing rows, or rows restored from a backup made before this column
+// existed), then enforce uniqueness.
 if (!yoyoCols.includes('uuid')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN uuid TEXT');
 }

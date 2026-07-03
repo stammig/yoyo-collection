@@ -1,4 +1,8 @@
--- Yoyo collection schema (mirrors the user's spreadsheet columns)
+-- Yoyo collection schema (mirrors the user's spreadsheet columns).
+-- Applied on every boot via db.js (CREATE TABLE IF NOT EXISTS — safe to re-run).
+-- Columns added after the initial release are migrated in with ALTER TABLE in
+-- db.js instead of edited in here, so this file always matches a fresh install
+-- while db.js documents the upgrade path for existing databases.
 
 CREATE TABLE IF NOT EXISTS yoyos (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +60,8 @@ CREATE TABLE IF NOT EXISTS yoyos (
   favorite        INTEGER NOT NULL DEFAULT 0,
   retired         INTEGER NOT NULL DEFAULT 0, -- discontinued / limited run (paid may exceed retail)
   deleted_at      TEXT,                       -- soft-delete tombstone; NULL = live. Deletes are kept as
-                                              -- tombstones so they propagate to other devices on sync (A2).
+                                              -- tombstones so a future sync could propagate them instead
+                                              -- of a stale copy resurrecting the row.
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

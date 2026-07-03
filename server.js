@@ -1,3 +1,10 @@
+// Yoyo Collection — Express app + REST API.
+//
+// Single-file server: auth/access control, the yoyo/photo/field-def CRUD API,
+// CSV import/export, and full zip backup/restore. Talks to SQLite through
+// db.js and to carrier tracking APIs through carriers.js. No build step — this
+// runs directly with `node server.js` (see app.cjs for the CommonJS startup
+// shim some hosts require).
 import express from 'express';
 import multer from 'multer';
 import fs from 'node:fs';
@@ -83,11 +90,16 @@ const SESSION_SECRET = process.env.SESSION_SECRET
   || crypto.createHash('sha256').update(`yoyo-session:${ADMIN_PASSWORD}`).digest('hex');
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
+// Signed, stateless session token: base64url(JSON payload) + "." + HMAC signature.
+// No server-side session store needed — validity is just "signature checks out
+// and exp hasn't passed".
 function makeToken() {
   const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE * 1000 })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
+// Verifies a token from makeToken(): signature must match (constant-time
+// compare, to avoid a timing side-channel) and it must not be expired.
 function validToken(token) {
   if (!token || !token.includes('.')) return false;
   const [payload, sig] = token.split('.');
@@ -97,6 +109,8 @@ function validToken(token) {
   try { return JSON.parse(Buffer.from(payload, 'base64url').toString()).exp > Date.now(); }
   catch { return false; }
 }
+// Minimal cookie parser — avoids pulling in a whole cookie-parsing dependency
+// for the one cookie this app sets.
 function parseCookies(req) {
   const out = {};
   for (const part of (req.headers.cookie || '').split(';')) {
@@ -109,6 +123,8 @@ function bearerToken(req) {
   const a = req.headers.authorization || '';
   return a.startsWith('Bearer ') ? a.slice(7) : '';
 }
+// Is this request from a logged-in owner? Checks both the session cookie and
+// a bearer token (see comment above on why both exist).
 function isLoggedIn(req) {
   if (!LOGIN_ENABLED) return false;
   // Cookie (works on the direct URL) OR bearer token (works inside an iframe,
@@ -301,6 +317,8 @@ function toNumber(v) {
   return cleaned === '' || isNaN(Number(cleaned)) ? null : Number(cleaned);
 }
 
+// Coerces a raw request body into a { column: value } map matching WRITE_COLS,
+// so the caller can hand it straight to a parameterized INSERT/UPDATE.
 function sanitizeYoyo(body) {
   const out = {};
   for (const f of TEXT_FIELDS) out[f] = body[f] == null ? '' : String(body[f]).trim();
@@ -333,6 +351,9 @@ async function makeThumb(filename) {
     .toFile(out);
 }
 
+// Expands a raw `yoyos` row into the shape the API/client expects: attaches
+// its photos (in sort order, as URLs), parses the `custom` JSON blob back into
+// an object, and adds the computed `percent_off`.
 function decorate(yoyo) {
   const photos = db
     .prepare('SELECT id, filename FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
@@ -348,15 +369,21 @@ const FIELD_TYPES = ['text', 'number', 'select', 'boolean'];
 const RESERVED_KEYS = new Set([...TEXT_FIELDS, ...NUMBER_FIELDS, ...BOOL_FIELDS,
   'id', 'custom', 'created_at', 'updated_at', 'percent_off', 'photos']);
 
+// All custom field definitions, in display order, with `options` parsed from
+// its stored JSON string into a real array.
 function loadFieldDefs() {
   return db.prepare('SELECT * FROM field_defs ORDER BY sort_order, id').all()
     .map((d) => ({ ...d, options: JSON.parse(d.options || '[]') }));
 }
 
+// Turns a user-typed label ("Wax Finish?") into a safe column-ish key
+// ("wax_finish") for storing inside the `custom` JSON blob.
 function slugify(label) {
   return String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'field';
 }
 
+// Disambiguates a slugified key against both the built-in columns and any
+// existing custom-field keys, appending _2, _3, ... until it's free.
 function uniqueKey(base) {
   const taken = new Set(db.prepare('SELECT key FROM field_defs').all().map((r) => r.key));
   let key = base, n = 2;
@@ -704,6 +731,8 @@ const money = (v) => (v == null ? '' : `$${Number(v).toFixed(2)}`);
 const grams = (v) => (v == null ? '' : `${Number(v).toFixed(2)} g`);
 const mm = (v) => (v == null ? '' : `${Number(v).toFixed(2)} mm`);
 
+// Formats one built-in column for a CSV export row, matching the spreadsheet's
+// original conventions (e.g. "$85.00", "64.60 g") so re-importing round-trips cleanly.
 function exportValue(header, y, base) {
   switch (header) {
     case 'In Hand': return y.in_hand ? 'x' : '';

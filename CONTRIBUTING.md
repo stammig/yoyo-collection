@@ -27,6 +27,9 @@ No build step — the front end is plain HTML/CSS/JS in `public/`.
 - **Don't commit data.** `data/`, `uploads/`, and `.env` are git-ignored; keep it
   that way.
 - One focused change per PR, with a short description of what and why.
+- **Update [CHANGELOG.md](CHANGELOG.md)** with a short entry for any
+  behavior-changing commit (new feature, fix, migration) — newest entry on
+  top, grouped by date.
 
 ## Reporting bugs / ideas
 Open an issue with steps to reproduce (for bugs) or the problem you're trying to

@@ -174,7 +174,8 @@ If you put an instance on the open internet, a sensible setup is:
 That's it — there are no accounts or third-party services involved.
 
 ## Contributing
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). See
+[CHANGELOG.md](CHANGELOG.md) for a history of what's changed and why.
 
 ## License
 [MIT](LICENSE) © David Barker

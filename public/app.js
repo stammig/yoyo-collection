@@ -1,3 +1,17 @@
+// Yoyo Collection — front end. Plain vanilla JS, no framework, no build step;
+// loaded directly by index.html as a single <script>. Architecture:
+//   - `yoyos` (below) is the one in-memory copy of the collection, loaded via
+//     loadAll() and re-rendered on every change — there's no client-side cache
+//     invalidation beyond "re-fetch and re-render".
+//   - `render()` is the single entry point for the Collection view: it re-runs
+//     filteredYoyos() and delegates to renderTiles()/renderRows(). The other
+//     top-level views (renderArrivals/renderSale/renderInsights) are peers,
+//     switched between by setView().
+//   - Every server write goes through api(), a fetch() wrapper that adds the
+//     bearer-token auth header and throws on non-2xx.
+//   - The file is organized into "---- section ----" comment banners in
+//     dependency order (state → helpers → each view → shared dialogs/settings);
+//     search for a banner name to jump to that feature.
 // ---- State ----
 let yoyos = [];
 let filters = {
@@ -139,6 +153,8 @@ let customDefs = [];
 let ALL_FIELDS = FIELD_DEFS.slice();
 let FIELD_BY_KEY = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, f]));
 
+// Adapts a server-side custom field definition into the same shape as a
+// built-in FIELD_DEFS entry, so both can live in one ALL_FIELDS registry.
 function customToDef(d) {
   return {
     key: d.key, label: d.label, custom: true, type: d.type, options: d.options || [],
@@ -146,6 +162,8 @@ function customToDef(d) {
     fmt: d.type === 'boolean' ? (v) => (v ? '✓' : '') : (v) => (v == null ? '' : String(v)),
   };
 }
+// Recomputes ALL_FIELDS/FIELD_BY_KEY after customDefs changes (loaded from the
+// server, or a field added/edited/deleted in Settings).
 function rebuildRegistry() {
   ALL_FIELDS = [...FIELD_DEFS, ...customDefs.map(customToDef)];
   FIELD_BY_KEY = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, f]));
@@ -205,6 +223,7 @@ async function api(url, opts = {}) {
 
 // ---- Load + render ----
 let loadGen = 0; // guards against out-of-order responses: only the latest in-flight call may apply its result
+// Fetches the full collection and re-renders whichever view is current.
 async function loadAll() {
   const gen = ++loadGen;
   const data = await api('/api/yoyos');
@@ -271,6 +290,8 @@ const DATALIST_SEEDS = {
   shapeList: ['Organic', 'H-Shape', 'V-Shape', 'W-Shape', 'Step Round'],
 };
 
+// Rebuilds the <datalist> autocomplete options for text fields like brand,
+// material, and finish from whatever values already exist in the collection.
 function refreshDatalists() {
   for (const [listId, field] of Object.entries(DATALIST_FIELD)) {
     const el = document.getElementById(listId);
@@ -282,6 +303,10 @@ function refreshDatalists() {
   buildFilterPanel();
 }
 
+// Applies the current `filters` (search, checkboxes, ranges) and sort order to
+// the full `yoyos` list. This is the single source of truth for "what's
+// currently visible" — every render function (tiles, rows, stats, insights)
+// starts from its result.
 function filteredYoyos() {
   let list = yoyos.slice();
   const q = filters.q.toLowerCase();
@@ -323,6 +348,8 @@ function filteredYoyos() {
   return list;
 }
 
+// Clicking a column header: sort by it, or flip direction if it's already the
+// active sort column.
 function setSort(key) {
   if (filters.sort === key) filters.sortDir = filters.sortDir === 'asc' ? 'desc' : 'asc';
   else { filters.sort = key; filters.sortDir = defaultDir(key); }
@@ -338,6 +365,8 @@ function filtersActive() {
     filters.paidMin != null || filters.paidMax != null || filters.retailMin != null || filters.retailMax != null ||
     filters.weightMin != null || filters.weightMax != null);
 }
+// Number of distinct filters currently applied, shown as a badge on the
+// filter toggle button.
 function activeFilterCount() {
   let n = 0;
   n += filters.brands.length + filters.compositions.length + filters.conditions.length;
@@ -351,6 +380,10 @@ function activeFilterCount() {
   return n;
 }
 
+// The main re-render entry point: recomputes the filtered/sorted list, updates
+// the stats bar and filter chips, paginates, and delegates to renderTiles or
+// renderRows depending on the current view mode. Call this after any change
+// to `filters`, `view`, or the underlying `yoyos` data.
 function render() {
   const all = filteredYoyos();
   renderStats(all);
@@ -373,6 +406,7 @@ function render() {
   syncViewControls();
 }
 
+// Placeholder cards shown while the initial /api/yoyos request is in flight.
 function renderSkeleton(n = 10) {
   if (!grid) return;
   grid.className = `grid size-${view.size}`;
@@ -383,6 +417,9 @@ function renderSkeleton(n = 10) {
   emptyMsg.classList.add('hidden');
 }
 
+// Renders the card-grid view and wires up each card's click (open detail),
+// double-click (jump to edit), right-click (context menu), favorite star, and
+// selection checkbox.
 function renderTiles(items) {
   grid.className = `grid size-${view.size}`;
   grid.innerHTML = items.map(tileHTML).join('');
@@ -416,6 +453,8 @@ function renderTiles(items) {
   );
 }
 
+// Builds the markup for one collection card: photo, brand/model, the fields
+// chosen in view.fields (as tags/meta text), price line, and sale/retired badges.
 function tileHTML(y) {
   const photo = y.photos[0]
     ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
@@ -472,6 +511,8 @@ function tileHTML(y) {
     </article>`;
 }
 
+// Renders the spreadsheet-style table view, with sortable column headers and
+// (when "Edit cells" is on) inline-editable cells.
 function renderRows(items) {
   grid.className = 'table-wrap';
   const cols = view.fields
@@ -538,6 +579,8 @@ function renderRows(items) {
   );
 }
 
+// Renders the "Showing X-Y of Z" summary and a compact page-number strip
+// (current page ± 2, plus first/last, with "…" gaps).
 function renderPager(total, start, shown, totalPages) {
   const pager = $('#pager');
   if (total === 0) { pager.classList.add('hidden'); return; }
@@ -587,6 +630,8 @@ function syncViewControls() {
   if (!showEdit && listEditMode) setListEdit(false);
 }
 
+// Populates the "Fields ▾" popover with a checkbox per field the current
+// viewer is allowed to see (public viewers don't get SENSITIVE fields).
 function buildFieldsPanel() {
   const panel = $('#fieldsPanel');
   const choices = ALL_FIELDS.filter((f) => canEditState || !SENSITIVE.has(f.key));
@@ -620,6 +665,8 @@ function buildFieldsPanel() {
 // ============================================================
 //  View router (Collection / Arrivals / Insights)
 // ============================================================
+// Switches between the Collection / Arrivals / For Sale / Insights views,
+// remembering the choice and rendering the newly-active one.
 function setView(v) {
   if (v === 'arrivals' && !canEditState) v = 'collection';
   currentView = v;
@@ -648,6 +695,9 @@ function refreshCurrentView() {
 }
 
 // ---- Quick actions (favorite / delete / context menu) ----
+// Turns a loaded yoyo record back into a full PUT-able payload. Needed because
+// the server's update endpoint overwrites every WRITE_COLS column from the
+// body — a partial payload would blank out fields the caller didn't mean to touch.
 function buildPayload(y) {
   const p = {};
   ['brand', 'model', 'color', 'body_material', 'composition', 'condition',
@@ -663,6 +713,7 @@ function buildPayload(y) {
   p.custom = y.custom || {};
   return p;
 }
+// Flips a yoyo's favorite star from the card/detail view.
 async function toggleFavorite(id) {
   if (demoGuard()) return;
   const y = yoyos.find((x) => x.id === id);
@@ -674,6 +725,7 @@ async function toggleFavorite(id) {
     await loadAll();
   } catch (err) { toast(err.message, 'error'); }
 }
+// Delete a single yoyo from a card's context menu, after a confirm dialog.
 async function deleteYoyoQuick(id) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
@@ -682,6 +734,8 @@ async function deleteYoyoQuick(id) {
   catch (err) { toast(err.message, 'error'); }
 }
 function dismissCardMenu() { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); }
+// Right-click / "⋮" context menu for a card: favorite, in-hand, retired,
+// edit, delete — positioned near the click so it never runs off-screen.
 function showCardMenu(e, id) {
   if (!canEditState) return;
   dismissCardMenu();
@@ -726,6 +780,8 @@ document.addEventListener('click', dismissCardMenu);
 document.addEventListener('scroll', dismissCardMenu, true);
 
 // Update one yoyo's fields (full-payload PUT, since the server blanks omitted cols).
+// Applies a partial change (e.g. { retired: true }) to one yoyo via a full
+// PUT built from its current record (see buildPayload).
 async function patchYoyo(id, changes) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
@@ -756,6 +812,7 @@ const BULK_FIELDS = [
   { key: 'sale_status', label: 'Sale status', type: 'select', seeds: ['For Sale', 'For Trade', 'For Sale or Trade', 'Sold'] },
 ];
 
+// Enters/exits multi-select mode (the checkbox-driven bulk actions bar).
 function setSelectMode(on) {
   selectMode = on;
   if (!on) selectedIds.clear();
@@ -766,6 +823,8 @@ function setSelectMode(on) {
   renderSelectionBar();
   render();
 }
+// Adds/removes one yoyo from the bulk-selection set and updates its checkbox
+// in place (cheaper than a full re-render).
 function toggleSelect(id) {
   if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
   document.querySelectorAll(`.card[data-id="${id}"], tr[data-id="${id}"]`).forEach((el) => el.classList.toggle('selected', selectedIds.has(id)));
@@ -789,6 +848,7 @@ function wireSelBox(box) {
     toggleSelect(Number(box.dataset.sel));
   });
 }
+// Renders (or removes) the floating bulk-actions bar shown while selectMode is on.
 function renderSelectionBar() {
   let bar = $('#selectionBar');
   if (!selectMode) { if (bar) bar.remove(); return; }
@@ -810,6 +870,8 @@ function renderSelectionBar() {
   bar.querySelector('[data-act="del"]').onclick = bulkDelete;
   bar.querySelector('[data-act="done"]').onclick = () => setSelectMode(false);
 }
+// Duplicates every selected yoyo (all fields except identity/derived ones;
+// photos aren't copied), tagging each copy's model with "(copy)".
 async function bulkDuplicate() {
   const ids = [...selectedIds];
   if (!ids.length) return;
@@ -833,6 +895,7 @@ async function bulkDuplicate() {
   await loadAll();
   toast(`Duplicated ${ok} yoyo${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}.`, fail ? 'error' : 'ok');
 }
+// Deletes every selected yoyo, after one confirm dialog for the whole batch.
 async function bulkDelete() {
   const ids = [...selectedIds];
   if (!ids.length) return;
@@ -844,6 +907,8 @@ async function bulkDelete() {
   await loadAll();
   toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}.`, 'ok');
 }
+// Opens the "Edit N yoyos" dialog (BULK_FIELDS only) — every control defaults
+// to "No change" so the apply step only touches fields the user actually set.
 function openBulkEdit() {
   if (!selectedIds.size) return;
   if (demoGuard()) return;
@@ -896,10 +961,12 @@ function openBulkEdit() {
 let smartViews = loadSmartViews();
 function loadSmartViews() { try { return JSON.parse(localStorage.getItem('yoyoSmartViews') || '[]'); } catch { return []; } }
 function saveSmartViews() { try { localStorage.setItem('yoyoSmartViews', JSON.stringify(smartViews)); } catch { /* ignore */ } }
+// Deep-copies the current filter criteria (excluding sort) for saving as a smart view.
 function filterSnapshot() {
   const { sort, sortDir, ...rest } = filters; // views capture criteria, not sort
   return JSON.parse(JSON.stringify(rest));
 }
+// Restores a saved smart view's filter criteria and re-renders the collection.
 function applySmartView(v) {
   const snap = JSON.parse(JSON.stringify(v.filters));
   Object.assign(filters, snap);
@@ -909,6 +976,7 @@ function applySmartView(v) {
   buildFilterPanel();
   render();
 }
+// Prompts for a name and saves the current filter set as a reusable smart view.
 async function saveCurrentAsView() {
   if (!filtersActive()) { toast('Set some filters first, then save a view.', 'error'); return; }
   const name = await promptDialog({ title: 'Save smart view', placeholder: 'e.g. Bimetal G2s under $80', confirmText: 'Save' });
@@ -923,6 +991,7 @@ function deleteSmartView(i) {
   saveSmartViews();
   renderSmartViews();
 }
+// Renders the sidebar's "Smart Views" list (owner-only, hidden when empty).
 function renderSmartViews() {
   const wrap = $('#smartViews');
   if (!wrap) return;
@@ -969,6 +1038,7 @@ const INLINE_SELECTS = {
   condition: ['MiB', 'NMBTS', 'Used', 'Beat'],
   bearing_size: ['Size C', 'Size D'],
 };
+// Toggles list-view inline cell editing (mutually exclusive with select mode).
 function setListEdit(on) {
   listEditMode = on;
   if (on) setSelectMode(false);
@@ -977,8 +1047,9 @@ function setListEdit(on) {
   if (btn) { btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', String(on)); }
   render();
 }
+// Built-in fields safe to edit inline in the list view (no photos or custom
+// fields — those need the full edit form).
 function editableKeys() {
-  // built-in fields safe to edit inline (no photos/custom here)
   return new Set(['brand', 'model', 'color', 'body_material', 'composition', 'condition',
     'bearing_size', 'response_type', 'release_date', 'tracking', 'eta',
     'retail', 'paid', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm',
@@ -1004,6 +1075,8 @@ function focusAdjacentCell(id, key, dir) {
   if (target) startCellEdit(target, id, target.dataset.edit);
 }
 const BOOL_KEYS = new Set(['in_hand', 'favorite', 'retired']);
+// Swaps a table cell's static text for an input/select, wires Enter/Escape/Tab
+// (Tab commits and moves to the next editable cell) and blur-to-save.
 function startCellEdit(td, id, key) {
   if (td.querySelector('input, select')) return;
   if (demoGuard()) return;
@@ -1044,11 +1117,13 @@ function startCellEdit(td, id, key) {
 
 // ---- Shared little helpers for Arrivals / Insights ----
 function trimNum(d) { d = Number(d); return d === Math.round(d) ? String(Math.round(d)) : String(d); }
+// Small thumbnail (or a blank placeholder) for a yoyo, used in Arrivals/Insights rows.
 function thumbHTML(y, cls) {
   const p = (y.photos && y.photos[0]) ? y.photos[0] : null;
   if (p) return `<img class="${cls}" src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`;
   return `<div class="${cls}"></div>`;
 }
+// Simple horizontal bar chart (used on Insights) from [{ name, value, display }].
 function barChart(rows, color) {
   if (!rows.length) return '';
   const max = Math.max(...rows.map((r) => r.value)) || 1;
@@ -1066,6 +1141,8 @@ let calMonth = firstOfMonth(new Date());
 let calSelected = null;
 function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+// Parses a stored ETA (ISO "YYYY-MM-DD", "M/D/YYYY", or whatever Date() can
+// handle) into a local midnight Date, or null if unparseable.
 function parseETA(s) {
   const t = String(s || '').trim();
   if (!t) return null;
@@ -1085,6 +1162,7 @@ function toDateInputValue(s) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+// "Arrives in 3 days" / "Was due 2 days ago" style label for an arrival date.
 function relativeETA(d) {
   const today = new Date();
   const a = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1095,6 +1173,8 @@ function relativeETA(d) {
   if (days === -1) return 'Was due yesterday';
   return `Was due ${-days} days ago`;
 }
+// Groups on-order yoyos (in_hand = false) with a parseable ETA by calendar
+// day, sorted earliest first — the data the Arrivals calendar dots are drawn from.
 function arrivalGroups() {
   const map = new Map();
   for (const y of yoyos) {
@@ -1107,6 +1187,8 @@ function arrivalGroups() {
   }
   return [...map.values()].sort((a, b) => a.day - b.day);
 }
+// One row in the Arrivals list: thumbnail, editable tracking/ETA inputs, an
+// optional "Query ETA" button, and a "mark as arrived" action.
 function arrivalRow(y, sub) {
   const queryBtn = trackingEnabledState
     ? `<button class="btn btn-ghost btn-sm arr-query" data-track-query="${y.id}" title="Look up ETA from the carrier">${SVG.box}<span>Query ETA</span></button>`
@@ -1147,6 +1229,9 @@ async function queryTracking(id, btn) {
     toast(err.message || 'Tracking lookup failed.', 'error');
   }
 }
+// Renders the Arrivals view: month calendar (with a dot on days that have an
+// arrival), plus a list for the selected day or all upcoming arrivals, and a
+// separate "no date yet" section.
 function renderArrivals() {
   const wrap = $('#viewArrivals');
   if (!canEditState) { wrap.innerHTML = `<div class="insight-note">${SVG.lock}<span>Log in to track incoming yoyos.</span></div>`; return; }
@@ -1241,6 +1326,8 @@ function isForSale(status) { return FOR_SALE_STATUSES.has(String(status || '').t
 function saleBadgeClass(status) {
   return status === 'For Trade' ? 'trade' : status === 'For Sale or Trade' ? 'both' : 'sale';
 }
+// Builds one card for the public For Sale grid: photo, sale-status badge, and
+// price (or "Open to trade" when there's no asking price).
 function saleCardHTML(y) {
   const thumb = y.photos[0]
     ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
@@ -1261,6 +1348,7 @@ function saleCardHTML(y) {
       </div>
     </article>`;
 }
+// Fetches the site-wide settings (currently just the For Sale shipping notes).
 async function loadSettings() {
   try { const s = await api('/api/settings'); saleNotes = s.sale_notes || ''; }
   catch { saleNotes = ''; }
@@ -1277,6 +1365,8 @@ function saleNotesHTML() {
   }
   return saleNotes ? `<div class="sale-notes">${esc(saleNotes).replace(/\n/g, '<br>')}</div>` : '';
 }
+// Renders the public For Sale page: shipping/sale notes, then a grid of every
+// yoyo whose sale_status is For Sale / For Trade / For Sale or Trade.
 function renderSale() {
   const wrap = $('#viewSale');
   const items = yoyos.filter((y) => isForSale(y.sale_status))
@@ -1310,16 +1400,19 @@ function renderSale() {
 // ============================================================
 function maxBy(arr, key) { let best = null; for (const y of arr) { const v = y[key]; if (v == null) continue; if (!best || v > best[key]) best = y; } return best; }
 function minBy(arr, key) { let best = null; for (const y of arr) { const v = y[key]; if (v == null) continue; if (!best || v < best[key]) best = y; } return best; }
+// Counts occurrences of `key` across `arr` and returns the top `n`, most-common first.
 function tallyTop(arr, key, n) {
   const m = {};
   for (const y of arr) { const k = y[key]; if (!k) continue; m[k] = (m[k] || 0) + 1; }
   return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, n);
 }
+// Total `paid` per brand, top `n` by spend descending — for the Insights "Spend by brand" chart.
 function spendByBrand(n) {
   const m = {};
   for (const y of yoyos) { if (y.paid == null || !y.brand) continue; m[y.brand] = (m[y.brand] || 0) + y.paid; }
   return Object.entries(m).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount).slice(0, n);
 }
+// Yoyo counts by composition (bi/mono/tri-metal), omitting compositions with none.
 function compositionTally() {
   const labels = { BI: 'Bi-metal', MN: 'Mono-metal', TRI: 'Tri-metal' };
   return ['BI', 'MN', 'TRI'].map((c) => ({ name: labels[c], count: yoyos.filter((y) => y.composition === c).length })).filter((t) => t.count > 0);
@@ -1329,6 +1422,9 @@ function metricCard(value, label, cls = '') {
 }
 function insightCard(title, inner) { return inner ? `<div class="insight-card"><h3>${esc(title)}</h3>${inner}</div>` : ''; }
 
+// Renders the Insights view: headline metrics, standout yoyos (most valuable,
+// best deal, heaviest/lightest), and bar charts. Financial metrics (value,
+// spend, savings, best-deal) are owner-only — public viewers see counts only.
 function renderInsights() {
   const wrap = $('#viewInsights');
   if (!yoyos.length) { wrap.innerHTML = '<div class="insight-note">Add some yoyos to see insights.</div>'; return; }
@@ -1384,6 +1480,9 @@ function renderInsights() {
 
 // ---- Detail (read-only) modal ----
 let detailList = [];
+// Opens the read-only detail modal for one yoyo, wiring prev/next navigation
+// (within the currently filtered/sorted list), the hero quick-action buttons,
+// and chip-click-to-filter.
 function openDetail(id) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
@@ -1412,6 +1511,9 @@ function openDetail(id) {
   $('#detailModal').classList.remove('hidden');
 }
 
+// Builds the detail modal's markup: a hero (lead photo, chips, price, quick
+// actions), the rest of the photo gallery, grouped spec sections (DETAIL_GROUPS),
+// custom fields, and the description.
 function detailHTML(y) {
   // ---- Hero summary (lead media + key facts) ----
   const lead = y.photos[0]
@@ -1493,6 +1595,8 @@ function openShareView(id) {
   document.body.classList.add('share-mode');
   openDetail(id);
 }
+// Closes the detail modal. When it was opened from a /y/:id share link, also
+// drops back to the app's normal "/" path and exits share mode.
 function closeDetail() {
   $('#detailModal').classList.add('hidden');
   detailId = null;
@@ -1503,6 +1607,7 @@ function closeDetail() {
     try { history.replaceState(null, '', '/'); } catch { /* ignore */ }
   }
 }
+// Moves the detail modal to the previous (-1) or next (1) yoyo in detailList.
 function detailStep(dir) {
   const i = detailList.indexOf(detailId);
   if (i < 0) return;
@@ -1532,6 +1637,7 @@ $('#detailDelete').addEventListener('click', async () => {
 const cssVar = (name, fallback) =>
   (getComputedStyle(document.body).getPropertyValue(name).trim() || fallback);
 
+// Promise-wraps Image loading so the share-card canvas can `await` a photo.
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -1542,6 +1648,8 @@ function loadImage(src) {
   });
 }
 
+// Traces a rounded-rectangle path on the canvas context (no native roundRect
+// fallback needed across the browsers this targets).
 function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -1585,6 +1693,11 @@ function wrapToLines(ctx, str, maxW, maxLines) {
   return out;
 }
 
+// Draws one yoyo's share card on an off-screen <canvas> and resolves the
+// finished image. Runs a measure pass first (title/chip/spec layout) so the
+// canvas height exactly fits whatever fields are visible, then a draw pass.
+// Everything here is already commented inline section-by-section; see
+// shareCard() below for how the resulting canvas becomes a downloadable PNG.
 async function renderCardBlob(y) {
   const W = 1080, M = 48, PAD = 56;
   const innerX = M + PAD, innerR = W - M - PAD, maxW = innerR - innerX;
@@ -1830,6 +1943,7 @@ async function renderCardBlob(y) {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas export failed'))), 'image/png'));
 }
 
+// Renders and triggers a browser download of one yoyo's share card PNG.
 async function shareCard(id) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
@@ -1868,6 +1982,8 @@ $('#detailCopyLink').addEventListener('click', async () => {
 // ---- Modal: add / edit ----
 let addAnother = false;   // set by "Save & add another"
 let lastBrand = '';       // carried over between add-another saves
+// Opens the add/edit form in "add" mode: blank form, optional prefilled brand
+// (used by "Save & add another").
 function openAdd(prefillBrand = '') {
   editingId = null;
   formGen++;
@@ -1886,6 +2002,8 @@ function openAdd(prefillBrand = '') {
   showModal();
 }
 
+// Opens the add/edit form pre-filled with an existing yoyo's data. `fromDetail`
+// tracks whether Cancel/Save should return to the detail modal.
 function openEdit(id, fromDetail = false) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
@@ -1913,6 +2031,7 @@ function openEdit(id, fromDetail = false) {
   showModal();
 }
 
+// Live-updates the "% off" readout in the form as retail/paid change.
 function updatePercentOff() {
   const retail = parseFloat(form.retail.value);
   const paid = parseFloat(form.paid.value);
@@ -1929,6 +2048,8 @@ function updatePercentOff() {
 }
 
 // ---- Live preview hero + tile pickers (Add/Edit form) ----
+// Live preview card at the top of the add/edit form, reflecting the fields as
+// they're typed (brand/model/color/composition/condition) before saving.
 function updateHero() {
   const hero = $('#editHero');
   if (!hero) return;
@@ -1950,6 +2071,8 @@ function updateHero() {
     `</div>`;
 }
 
+// Highlights the active tile-picker option (e.g. composition/shape) to match
+// its hidden form field's current value.
 function syncTiles() {
   document.querySelectorAll('#yoyoForm .tile-group').forEach((group) => {
     const input = form.elements[group.dataset.for];
@@ -1970,6 +2093,8 @@ $('#yoyoForm').addEventListener('click', (e) => {
   updateHero();
 });
 
+// Renders the form's photo thumbnail strip, with per-photo remove/reorder
+// controls and a "cover" badge on the first one.
 function renderPhotoStrip(photos) {
   // Dropzone only makes sense once the yoyo exists (uploads need an id).
   $('#dropzone').classList.toggle('hidden', !editingId);
@@ -2027,6 +2152,7 @@ function wirePhotoDragDrop() {
   });
 }
 
+// Saves a new photo order to the server and refreshes the strip + collection.
 async function persistPhotoOrder(ids) {
   if (!editingId || ids.length < 2) return;
   try {
@@ -2051,6 +2177,8 @@ function movePhoto(pid, dir) {
   persistPhotoOrder(ids);
 }
 
+// Renders the add/edit form's custom-fields section, one input per field
+// definition (select fields use a datalist so a new value can be typed in).
 function renderCustomFields(values) {
   const wrap = $('#customFields');
   $('#customSection').hidden = customDefs.length === 0;
@@ -2073,6 +2201,7 @@ function renderCustomFields(values) {
   }).join('');
 }
 
+// Reads the custom-fields section back into a { key: value } object for submit.
 function collectCustom() {
   const out = {};
   $('#customFields').querySelectorAll('[data-cf]').forEach((el) => {
@@ -2168,6 +2297,8 @@ $('#deleteBtn').addEventListener('click', async () => {
 });
 
 // ---- Photos ----
+// Uploads dropped/picked image files to the currently-editing yoyo (uploads
+// require an existing id, so this is a no-op on a not-yet-saved "add" form).
 async function uploadFiles(fileList) {
   if (!editingId) { toast('Save the yoyo first, then add photos.', 'error'); return; }
   const images = [...(fileList || [])].filter((f) => f.type.startsWith('image/'));
@@ -2241,6 +2372,7 @@ $('#sort').addEventListener('change', (e) => { filters.sort = e.target.value; fi
 $('#sortDirBtn').addEventListener('click', () => { filters.sortDir = filters.sortDir === 'asc' ? 'desc' : 'asc'; render(); });
 $('#clearFilters').addEventListener('click', clearAllFilters);
 
+// Resets every filter (search, checkboxes, ranges) back to defaults.
 function clearAllFilters() {
   filters.q = '';
   filters.brands = []; filters.compositions = []; filters.conditions = [];
@@ -2255,6 +2387,10 @@ function clearAllFilters() {
 // ---- Advanced filter panel ----
 function num(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 
+// Rebuilds the advanced filter popover (brand checklist with counts,
+// composition/condition chips, material text, status, ranges) and wires each
+// control to mutate `filters` and re-render — not rebuilt on every keystroke,
+// so focus isn't lost while typing in a range input.
 function buildFilterPanel() {
   const panel = $('#filterPanel');
   if (!panel) return;
@@ -2326,6 +2462,7 @@ function buildFilterPanel() {
   const fFav = panel.querySelector('#fFav'); if (fFav) fFav.addEventListener('change', () => { filters.favOnly = fFav.checked; view.page = 1; render(); });
 }
 
+// Updates the numeric badge on the filter toggle button.
 function updateFilterCount() {
   const badge = $('#filterCount');
   if (!badge) return;
@@ -2334,6 +2471,8 @@ function updateFilterCount() {
   badge.classList.toggle('hidden', n === 0);
 }
 
+// Renders the row of removable "chips" below the toolbar summarizing every
+// active filter, plus a "Save view" button when the owner has any filters set.
 function renderActiveFilters() {
   const wrap = $('#activeFilters');
   if (!wrap) return;
@@ -2506,6 +2645,9 @@ function renderDemoBanner(loggedIn) {
     : '🪀 <strong>Live demo.</strong> Log in with password <strong>demo</strong> to see the owner view. Editing is disabled.';
 }
 
+// Fetches /api/config (edit permission, login/demo state, whether carrier
+// tracking is configured) and updates the chrome accordingly — this runs once
+// on load and again after login/logout.
 async function loadConfig() {
   let c = { canEdit: true, loginEnabled: false, loggedIn: false };
   try { c = await api('/api/config'); } catch { /* default: editable */ }
@@ -2597,6 +2739,7 @@ function syncThemeSeg() {
   const cur = document.documentElement.dataset.theme || 'auto';
   document.querySelectorAll('#themeSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.theme === cur));
 }
+// Applies and persists a theme choice ('auto' follows the OS; 'light'/'dark' force it).
 function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   else { delete document.documentElement.dataset.theme; t = 'auto'; }
@@ -2639,10 +2782,13 @@ $('#optimizePhotosBtn').addEventListener('click', async () => {
 });
 
 // ---- Settings: custom field management ----
+// Fetches custom field definitions from the server and rebuilds ALL_FIELDS.
 async function loadFields() {
   try { customDefs = await api('/api/fields'); } catch { customDefs = []; }
   rebuildRegistry();
 }
+// Drops any view.fields entries pointing at a custom field that's since been
+// deleted, so a stale key doesn't linger in the field picker/localStorage.
 function pruneViewFields() {
   const keys = new Set(ALL_FIELDS.map((f) => f.key));
   view.fields = view.fields.filter((k) => keys.has(k));
@@ -2650,6 +2796,7 @@ function pruneViewFields() {
 }
 let editingFieldId = null;
 
+// Renders the Settings → custom fields list, with reorder/edit/delete controls.
 function renderFieldList() {
   const list = $('#fieldList');
   if (!customDefs.length) { list.innerHTML = '<p class="hint">No custom fields yet.</p>'; return; }
@@ -2672,6 +2819,8 @@ function renderFieldList() {
   list.querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => reorderField(Number(b.dataset.down), 1)));
 }
 
+// Deletes a custom field definition (after confirming) and strips its values
+// out of every yoyo — the server does the same on its side.
 async function deleteField(id) {
   const d = customDefs.find((x) => x.id === id);
   if (!await confirmDialog({ title: `Delete the “${d ? d.label : ''}” field?`, message: 'Its values will be removed from every yoyo.', confirmText: 'Delete', danger: true })) return;
@@ -2682,6 +2831,7 @@ async function deleteField(id) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+// Swaps a custom field with its neighbor (up/down) and persists the new order.
 async function reorderField(id, dir) {
   const idx = customDefs.findIndex((d) => d.id === id);
   const j = idx + dir;
@@ -2697,6 +2847,8 @@ async function reorderField(id, dir) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+// Opens the add-field form pre-filled for editing an existing custom field
+// (its type is locked — only text/select fields can add options after creation).
 function editField(id) {
   const d = customDefs.find((x) => x.id === id);
   if (!d) return;
@@ -2714,6 +2866,7 @@ function editField(id) {
   f.label.focus();
 }
 
+// Clears and hides the add/edit-field form, back to its "Add field" state.
 function resetAddFieldForm() {
   const f = $('#addFieldForm');
   f.reset();
@@ -2758,6 +2911,8 @@ $('#addFieldForm').addEventListener('submit', async (e) => {
 });
 
 // ---- Iframe auto-resize: tell a parent page (e.g. WordPress) our height ----
+// Tells an embedding parent page (e.g. WordPress via ?embed=1) our current
+// content height, via postMessage, so the host iframe can resize to fit.
 function postHeight() {
   try {
     if (window.parent !== window) {
