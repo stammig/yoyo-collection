@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
 ## 2026-07-03
+- **Add CHANGELOG.md and document the codebase** (`f508aa1`) — added this file
+  and a note in CONTRIBUTING.md to keep it updated going forward. Added a file
+  header and doc comments throughout `server.js`, `db.js`, `schema.sql`, and
+  ~55 previously-uncommented functions in `public/app.js`, so someone unfamiliar
+  with the code can read a function and understand what it does and why.
 - **Shared data layer foundation** (`2c6cba2`) — every yoyo now has a stable
   `uuid` (backfilled on existing rows, generated on create/import/restore,
   preserved on update, exposed in the API). Deletes are now **soft-deletes**:
