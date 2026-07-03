@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-03 (2)
+- **Fix Add-form field carryover + mobile layout overflow, dedupe dropdown
+  values** — three bugs reported after real-world use:
+  - "Save & add another" carried over more than intended: brand carryover was
+    a deliberate feature but proved more annoying than useful in practice, so
+    it's removed — every new Add form is now fully blank. Composition and
+    Condition (the tile-picker fields) were leaking across *any* fresh Add
+    form, not just "add another" — root cause was that `form.reset()` can't
+    blank a hidden `<input>`, because for that input type the `value` IDL
+    property *is* the default value (unlike text/number inputs, which track
+    a separate "current" vs. "default" value). The tile click handler's
+    `input.value = ...` was permanently overwriting the default. Fixed by
+    explicitly clearing each `.tile-group`'s linked input in `openAdd()`.
+  - Mobile layout: modal footers (detail view, add/edit form) held 4-5
+    buttons in a single non-wrapping flex row, so on an iPhone-width screen
+    the primary action (Edit / Save) was pushed off-screen with no way to
+    reach it. The Filters and Fields toolbar popovers were anchored `left: 0`
+    under buttons that sit right-of-center in the toolbar, so they overflowed
+    off the right edge of the screen, hiding several options. Fixed by
+    letting `.modal-foot` wrap (forcing the destructive Delete button onto
+    its own row via a full-width spacer break) and anchoring both popovers
+    `right: 0` — the same pattern the toolbar's "⋯ Data tools" menu already
+    used correctly. Also fixed the Status section's In hand/Favorite/Retired
+    toggle row clipping "Retired" off-screen on narrow widths.
+  - Dropdown/autocomplete fields (Body Material, Bearing Size, Response Type)
+    had accumulated near-duplicate free-text entries from being typed
+    slightly differently over time (e.g. "6061 AL, Stainless Steel" vs
+    "6061 AL, SS", "CLYW Snow Tires" vs "CLYW Snow Tire"). Added
+    `normalize-fields.mjs` — a small, re-runnable, exact-match merge script
+    (mirrors `fill-specs.mjs`'s pattern) that also writes an equivalent guarded
+    SQL script for the live DB. Extend its `MERGES` list whenever a new
+    duplicate turns up.
+
 ## 2026-07-03
 - **Add CHANGELOG.md and document the codebase** (`f508aa1`) — added this file
   and a note in CONTRIBUTING.md to keep it updated going forward. Added a file

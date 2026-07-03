@@ -1981,19 +1981,24 @@ $('#detailCopyLink').addEventListener('click', async () => {
 
 // ---- Modal: add / edit ----
 let addAnother = false;   // set by "Save & add another"
-let lastBrand = '';       // carried over between add-another saves
-// Opens the add/edit form in "add" mode: blank form, optional prefilled brand
-// (used by "Save & add another").
-function openAdd(prefillBrand = '') {
+// Opens the add/edit form in "add" mode: always a fully blank form.
+function openAdd() {
   editingId = null;
   formGen++;
   cameFromDetail = false;
   $('#modalTitle').textContent = 'Add a yoyo';
   $('#saveBtn').textContent = 'Add to collection';
   form.reset();
+  // form.reset() can't blank the tile-picker fields (composition, condition):
+  // for a hidden <input>, the `value` IDL attribute IS the default value, so
+  // the tile click handler's `input.value = ...` permanently overwrites what
+  // reset() would restore. Clear them explicitly instead.
+  document.querySelectorAll('#yoyoForm .tile-group').forEach((group) => {
+    const input = form.elements[group.dataset.for];
+    if (input) input.value = '';
+  });
   $('#deleteBtn').classList.add('hidden');
   $('#saveAddAnotherBtn').classList.remove('hidden'); // only meaningful when adding
-  if (prefillBrand) form.brand.value = prefillBrand;
   renderPhotoStrip([]);
   renderCustomFields({});
   updatePercentOff();
@@ -2262,9 +2267,8 @@ form.addEventListener('submit', async (e) => {
     // don't yank their current screen back to reflect this stale submission.
     if (formGen !== myGen) return;
     if (isNew && another) {
-      lastBrand = (data.brand || '').trim();
       editingId = null;
-      openAdd(lastBrand); // straight into a fresh form, brand carried over
+      openAdd(); // straight into a fresh, fully blank form
       toast('Saved. Add the next one…', 'ok');
     } else if (isNew) {
       openEdit(editingId); // new yoyo: stay in the form to add photos right away
