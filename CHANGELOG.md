@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-04
+- **Sold yoyos move to history with real profit/loss tracking** — marking a
+  yoyo Sold now actually removes it from the active Collection (grid, list,
+  search, and the header stats all start from "owned = everything not Sold"),
+  so the collection count and value reflect only what you still own; the
+  record itself is untouched and lives on the Sold page. That page gained a
+  proper ledger in logical order — **# sold → total proceeds → total cost →
+  net profit/loss** — where the net is computed only over sales whose
+  original cost (`paid`) is known and the label says so when that's a subset
+  ("Net (2 with cost)"). Each sold card now shows its own sale economics:
+  `$paid → $proceeds` with the net gain/loss colored green/red by sign, or
+  "cost unknown" when `paid` was never recorded. Insights was split the same
+  way: owned metrics (count, in hand/on order, Collection value, Saved, Avg
+  discount/paid, standouts, brand/composition charts) exclude sold yoyos,
+  while **Total paid stays lifetime spend** and is joined by Sold count,
+  Recovered, Net spent (`total paid − recovered`), and a signed "Sale net"
+  card. New `isSold()`/`ownedYoyos()`/`saleNet()` helpers are the single
+  source of truth for all of it.
+
 ## 2026-07-03 (4)
 - **Add sold-yoyo tracking: new Sold tab, trade valuation, net-spend stats** —
   a new owner-only "Sold" tab lists every yoyo marked Sold (most recent first,

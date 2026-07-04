@@ -538,6 +538,7 @@ body.read-only .card-actions { display: none; }
 .metric-value { font-size: 1.55rem; font-weight: 680; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
 .metric-value.accent { color: var(--accent); }
 .metric-value.green { color: var(--green); }
+.metric-value.red { color: var(--danger); }
 .metric-label { color: var(--muted); font-size: 0.72rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 4px; }
 
 .insight-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow-card); margin-bottom: 18px; }
@@ -795,6 +796,12 @@ body.read-only .card-actions { display: none; }
 .sale-model { font-weight: 600; font-size: 0.95rem; line-height: 1.2; margin-top: 1px; }
 .sale-sub { font-size: 0.78rem; color: var(--muted); margin-top: 3px; }
 .sale-price { font-weight: 700; font-size: 1.02rem; margin-top: 8px; }
+/* Per-sale profit/loss on Sold cards, colored by sign. */
+.sale-net { font-weight: 700; }
+.sale-net.pos { color: var(--green); }
+.sale-net.neg { color: var(--danger); }
+/* Summary ledger on the Sold page sits tighter than the Insights grid. */
+.sold-summary { margin-bottom: 16px; }
 .sale-or { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
 
 /* Public demo banner */

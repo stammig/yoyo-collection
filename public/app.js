@@ -244,9 +244,10 @@ function renderStats(list) {
     paid += y.paid || 0;
     retail += y.retail || 0;
   }
+  const ownedCount = ownedYoyos().length;
   const count = list.length;
-  const filtered = count !== yoyos.length;
-  const countLabel = filtered ? `of ${yoyos.length} shown` : 'Yoyos';
+  const filtered = count !== ownedCount;
+  const countLabel = filtered ? `of ${ownedCount} shown` : 'Yoyos';
 
   // Public viewers don't see financial / ownership stats.
   if (!canEditState) {
@@ -305,12 +306,17 @@ function refreshDatalists() {
   buildFilterPanel();
 }
 
+// Sold yoyos are history — they live on the Sold page, not in the active
+// collection. Everything that means "the collection" starts from ownedYoyos().
+function isSold(y) { return y.sale_status === 'Sold'; }
+function ownedYoyos() { return yoyos.filter((y) => !isSold(y)); }
+
 // Applies the current `filters` (search, checkboxes, ranges) and sort order to
-// the full `yoyos` list. This is the single source of truth for "what's
+// the owned (non-sold) yoyos. This is the single source of truth for "what's
 // currently visible" — every render function (tiles, rows, stats, insights)
 // starts from its result.
 function filteredYoyos() {
-  let list = yoyos.slice();
+  let list = ownedYoyos();
   const q = filters.q.toLowerCase();
   if (q) {
     list = list.filter((y) =>
@@ -1409,6 +1415,12 @@ function recoveredAmount(y) {
   if (y.sale_status !== 'Sold') return 0;
   return y.trade_value != null ? y.trade_value : (y.sale_price != null ? y.sale_price : 0);
 }
+// Profit/loss on a completed sale: proceeds minus what was paid. Null when
+// the original cost is unknown (can't compute a real P&L without it).
+function saleNet(y) {
+  if (y.sale_status !== 'Sold' || y.paid == null) return null;
+  return recoveredAmount(y) - y.paid;
+}
 // One row in the Sold list: photo, sold date/buyer, and either the cash
 // amount or the trade's valuation.
 function soldCardHTML(y) {
@@ -1417,9 +1429,19 @@ function soldCardHTML(y) {
     : '<span class="placeholder"></span>';
   const isTrade = y.trade_value != null;
   const amount = recoveredAmount(y);
-  const priceLine = amount > 0
-    ? `<div class="sale-price">${money(amount)}${isTrade ? ' <span class="sale-or">traded</span>' : ''}</div>`
-    : `<div class="sale-price">${isTrade ? 'Traded' : '—'}</div>`;
+  const net = saleNet(y);
+  // Economics line: paid → proceeds with the net colored by sign, or just the
+  // proceeds when the original cost was never recorded.
+  let priceLine;
+  if (net != null) {
+    const netTxt = `${net >= 0 ? '+' : '−'}${money0(Math.abs(net))}`;
+    priceLine = `<div class="sale-price">${money0(y.paid)} → ${money0(amount)}`
+      + ` <span class="sale-net ${net >= 0 ? 'pos' : 'neg'}">${netTxt}</span></div>`;
+  } else if (amount > 0) {
+    priceLine = `<div class="sale-price">${money(amount)} <span class="sale-or">cost unknown</span></div>`;
+  } else {
+    priceLine = `<div class="sale-price">${isTrade ? 'Traded' : '—'}</div>`;
+  }
   const sub = [y.sold_date, y.buyer].filter(Boolean).join(' · ');
   return `<article class="sale-card" data-id="${y.id}" role="button" tabindex="0" aria-label="${esc(y.brand)} ${esc(y.model)}">
       <div class="sale-photo">${thumb}<span class="sale-badge ${isTrade ? 'trade' : 'sale'}">${isTrade ? 'Traded' : 'Sold'}</span></div>
@@ -1432,15 +1454,27 @@ function soldCardHTML(y) {
     </article>`;
 }
 // Renders the owner-only Sold view: every yoyo marked Sold, most recent
-// first, with a running total of what was recovered across all of them.
+// first, with a ledger in logical order — how many sold, what they brought
+// in, what they cost, and the net profit/loss (only over sales whose cost
+// is known, noted when that's a subset).
 function renderSold() {
   const wrap = $('#viewSold');
-  const items = yoyos.filter((y) => y.sale_status === 'Sold')
+  const items = yoyos.filter(isSold)
     .sort((a, b) => String(b.sold_date || '').localeCompare(String(a.sold_date || '')));
-  const recovered = items.reduce((a, y) => a + recoveredAmount(y), 0);
+  const proceeds = items.reduce((a, y) => a + recoveredAmount(y), 0);
+  const withCost = items.filter((y) => y.paid != null);
+  const cost = withCost.reduce((a, y) => a + y.paid, 0);
+  const net = withCost.reduce((a, y) => a + saleNet(y), 0);
+  const netTxt = `${net >= 0 ? '+' : '−'}${money0(Math.abs(net))}`;
+  const netLabel = withCost.length === items.length ? 'Net' : `Net (${withCost.length} with cost)`;
+  const summary = `<div class="metrics-grid sold-summary">`
+    + metricCard(String(items.length), 'Sold')
+    + metricCard(money0(proceeds), 'Proceeds', 'green')
+    + metricCard(money0(cost), 'Cost')
+    + metricCard(netTxt, netLabel, net >= 0 ? 'green' : 'red')
+    + `</div>`;
   const body = items.length
-    ? `<p class="sale-intro">${items.length} sold · ${money0(recovered)} recovered</p>`
-      + `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`
+    ? summary + `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`
     : '<div class="insight-note">Nothing marked as sold yet.</div>';
   wrap.innerHTML = body;
   wrap.querySelectorAll('.sale-card[data-id]').forEach((el) => {
@@ -1467,10 +1501,12 @@ function spendByBrand(n) {
   for (const y of yoyos) { if (y.paid == null || !y.brand) continue; m[y.brand] = (m[y.brand] || 0) + y.paid; }
   return Object.entries(m).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount).slice(0, n);
 }
-// Yoyo counts by composition (bi/mono/tri-metal), omitting compositions with none.
+// Yoyo counts by composition (bi/mono/tri-metal) across the owned collection,
+// omitting compositions with none.
 function compositionTally() {
   const labels = { BI: 'Bi-metal', MN: 'Mono-metal', TRI: 'Tri-metal' };
-  return ['BI', 'MN', 'TRI'].map((c) => ({ name: labels[c], count: yoyos.filter((y) => y.composition === c).length })).filter((t) => t.count > 0);
+  const owned = ownedYoyos();
+  return ['BI', 'MN', 'TRI'].map((c) => ({ name: labels[c], count: owned.filter((y) => y.composition === c).length })).filter((t) => t.count > 0);
 }
 function metricCard(value, label, cls = '') {
   return `<div class="metric-card"><div class="metric-value ${cls}">${esc(value)}</div><div class="metric-label">${esc(label)}</div></div>`;
@@ -1484,18 +1520,23 @@ function renderInsights() {
   const wrap = $('#viewInsights');
   if (!yoyos.length) { wrap.innerHTML = '<div class="insight-note">Add some yoyos to see insights.</div>'; return; }
   const admin = canEditState;
-  const count = yoyos.length;
-  const inHand = yoyos.filter((y) => y.in_hand).length;
-  const totalRetail = yoyos.reduce((a, y) => a + (y.retail || 0), 0);
+  // Owned = the active collection. Sold yoyos still count toward lifetime
+  // spend (Total paid / Recovered / Net spent) but not collection metrics.
+  const owned = ownedYoyos();
+  const count = owned.length;
+  const inHand = owned.filter((y) => y.in_hand).length;
+  const totalRetail = owned.reduce((a, y) => a + (y.retail || 0), 0);
   const totalPaid = yoyos.reduce((a, y) => a + (y.paid || 0), 0);
-  const saved = yoyos.reduce((a, y) => (y.retail != null && y.paid != null) ? a + (y.retail - y.paid) : a, 0);
-  const discounts = yoyos.map((y) => y.percent_off).filter((v) => v != null);
+  const saved = owned.reduce((a, y) => (y.retail != null && y.paid != null) ? a + (y.retail - y.paid) : a, 0);
+  const discounts = owned.map((y) => y.percent_off).filter((v) => v != null);
   const avgDiscount = discounts.length ? discounts.reduce((a, b) => a + b, 0) / discounts.length : null;
-  const paids = yoyos.map((y) => y.paid).filter((v) => v != null);
+  const paids = owned.map((y) => y.paid).filter((v) => v != null);
   const avgPaid = paids.length ? paids.reduce((a, b) => a + b, 0) / paids.length : null;
-  const soldYoyos = yoyos.filter((y) => y.sale_status === 'Sold');
+  const soldYoyos = yoyos.filter(isSold);
   const recovered = soldYoyos.reduce((a, y) => a + recoveredAmount(y), 0);
   const netSpent = totalPaid - recovered;
+  const nets = soldYoyos.map(saleNet).filter((v) => v != null);
+  const totalNet = nets.length ? nets.reduce((a, b) => a + b, 0) : null;
 
   let metrics = metricCard(String(count), 'Yoyos');
   if (admin) {
@@ -1507,25 +1548,30 @@ function renderInsights() {
     if (avgDiscount != null) metrics += metricCard(`${Math.round(avgDiscount)}%`, 'Avg discount', 'green');
     if (avgPaid != null) metrics += metricCard(money0(avgPaid), 'Avg paid');
     if (soldYoyos.length) {
+      metrics += metricCard(String(soldYoyos.length), 'Sold');
       metrics += metricCard(money0(recovered), 'Recovered', 'green');
       metrics += metricCard(money0(netSpent), 'Net spent');
+      if (totalNet != null) {
+        metrics += metricCard(`${totalNet >= 0 ? '+' : '−'}${money0(Math.abs(totalNet))}`, 'Sale net',
+          totalNet >= 0 ? 'green' : 'red');
+      }
     }
   } else {
-    metrics += metricCard(String(new Set(yoyos.map((y) => y.brand).filter(Boolean)).size), 'Brands');
+    metrics += metricCard(String(new Set(owned.map((y) => y.brand).filter(Boolean)).size), 'Brands');
   }
 
   const standouts = [];
-  if (admin) { const y = maxBy(yoyos, 'retail'); if (y) standouts.push({ icon: SVG.gem, label: 'Most valuable', y, value: money(y.retail) }); }
-  if (admin) { const y = maxBy(yoyos.filter((x) => (x.percent_off || 0) > 0), 'percent_off'); if (y) standouts.push({ icon: SVG.tag, label: 'Best deal', y, value: `${y.percent_off}% off` }); }
-  { const y = maxBy(yoyos, 'weight_g'); if (y) standouts.push({ icon: SVG.scale, label: 'Heaviest', y, value: `${trimNum(y.weight_g)} g` }); }
-  { const y = minBy(yoyos, 'weight_g'); if (y) standouts.push({ icon: SVG.feather, label: 'Lightest', y, value: `${trimNum(y.weight_g)} g` }); }
+  if (admin) { const y = maxBy(owned, 'retail'); if (y) standouts.push({ icon: SVG.gem, label: 'Most valuable', y, value: money(y.retail) }); }
+  if (admin) { const y = maxBy(owned.filter((x) => (x.percent_off || 0) > 0), 'percent_off'); if (y) standouts.push({ icon: SVG.tag, label: 'Best deal', y, value: `${y.percent_off}% off` }); }
+  { const y = maxBy(owned, 'weight_g'); if (y) standouts.push({ icon: SVG.scale, label: 'Heaviest', y, value: `${trimNum(y.weight_g)} g` }); }
+  { const y = minBy(owned, 'weight_g'); if (y) standouts.push({ icon: SVG.feather, label: 'Lightest', y, value: `${trimNum(y.weight_g)} g` }); }
   const standoutsHTML = standouts.length ? insightCard('Standouts',
     `<div class="standouts">${standouts.map((s) =>
       `<div class="standout-row" data-arr="${s.y.id}"><span class="standout-icon">${s.icon}</span>${thumbHTML(s.y, 'standout-thumb')}` +
       `<div class="standout-main"><div class="standout-label">${esc(s.label)}</div><div class="standout-name">${esc(s.y.brand)} ${esc(s.y.model)}</div></div>` +
       `<span class="standout-value">${esc(s.value)}</span></div>`).join('')}</div>`) : '';
 
-  const brandRows = tallyTop(yoyos.filter((y) => y.brand), 'brand', 8).map((t) => ({ name: t.name, value: t.count, display: String(t.count) }));
+  const brandRows = tallyTop(owned.filter((y) => y.brand), 'brand', 8).map((t) => ({ name: t.name, value: t.count, display: String(t.count) }));
   const brandChart = insightCard('Top brands', barChart(brandRows, 'var(--accent)'));
   let spendChart = '';
   if (admin) {
