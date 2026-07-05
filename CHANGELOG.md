@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-04 (2)
+- **Exempt `/uploads` photo GETs from the rate limiter** — the limiter
+  exists to protect the API from abuse, but it was also counting static
+  photo file requests. The native app's "Import from server" fetches
+  hundreds of photos in a burst and got rate-limited into corrupt
+  imports (the app stored the 429 error body as image data — fixed
+  app-side too). Photo files are immutable and long-cached; they now
+  pass through uncounted.
+
 ## 2026-07-04
 - **Sold yoyos move to history with real profit/loss tracking** — marking a
   yoyo Sold now actually removes it from the active Collection (grid, list,

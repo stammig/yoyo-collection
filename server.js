@@ -48,6 +48,10 @@ if (RATE_LIMIT_MAX > 0) {
   }, RATE_LIMIT_WINDOW_MS).unref();
 
   app.use((req, res, next) => {
+    // Static photos are cheap, immutable, long-cached files — and a native-app
+    // import legitimately fetches hundreds in a burst. The limiter exists to
+    // protect the API, so photo GETs pass through uncounted.
+    if (req.method === 'GET' && req.path.startsWith('/uploads/')) return next();
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
       || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
