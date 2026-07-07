@@ -17,7 +17,7 @@ import { parse } from 'csv-parse/sync';
 import AdmZip from 'adm-zip';
 import archiver from 'archiver';
 import { track as trackPackage, configuredCarriers } from './carriers.js';
-import db, { DB_PATH, openDatabase, backfillUuids } from './db.js';
+import db, { DB_PATH, openDatabase, backfillUuids, backfillPhotoUuids, nextRev } from './db.js';
 
 // sharp (image thumbnails) is native; on some shared hosts it may not install.
 // Load it optionally so the app still boots and just serves full images.
@@ -187,6 +187,12 @@ app.use((req, res, next) => {
 
   // Block data-changing requests unless the requester is allowed to edit.
   if (isWrite && !canEdit(req)) {
+    // Sync clients distinguish "token expired — re-login silently" (401) from
+    // "writes are off here" (403, e.g. demo mode above). Only sync routes get
+    // the 401; the web client's own error handling expects 403 elsewhere.
+    if (req.path.startsWith('/api/sync/')) {
+      return res.status(401).json({ error: 'Please sign in to sync.' });
+    }
     return res.status(403).json({
       error: LOGIN_ENABLED ? 'Please log in to make changes.' : 'This collection is read-only.',
     });
@@ -360,9 +366,9 @@ async function makeThumb(filename) {
 // an object, and adds the computed `percent_off`.
 function decorate(yoyo) {
   const photos = db
-    .prepare('SELECT id, filename FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
+    .prepare('SELECT id, uuid, filename FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
     .all(yoyo.id)
-    .map((p) => ({ id: p.id, url: `/uploads/${p.filename}`, thumbUrl: `/uploads/${thumbName(p.filename)}` }));
+    .map((p) => ({ id: p.id, uuid: p.uuid, url: `/uploads/${p.filename}`, thumbUrl: `/uploads/${thumbName(p.filename)}` }));
   let custom = {};
   try { custom = JSON.parse(yoyo.custom || '{}'); } catch { /* ignore bad JSON */ }
   return { ...yoyo, custom, percent_off: percentOff(yoyo), photos };
@@ -371,7 +377,7 @@ function decorate(yoyo) {
 // ---- Custom fields ----
 const FIELD_TYPES = ['text', 'number', 'select', 'boolean'];
 const RESERVED_KEYS = new Set([...TEXT_FIELDS, ...NUMBER_FIELDS, ...BOOL_FIELDS,
-  'id', 'custom', 'created_at', 'updated_at', 'percent_off', 'photos']);
+  'id', 'uuid', 'custom', 'created_at', 'updated_at', 'deleted_at', 'rev', 'percent_off', 'photos']);
 
 // All custom field definitions, in display order, with `options` parsed from
 // its stored JSON string into a real array.
@@ -448,7 +454,8 @@ app.get('/api/yoyos/:id', (req, res) => {
 const WRITE_COLS_C = [...WRITE_COLS, 'custom'];
 // Columns written when creating a row. `uuid` is server-generated here (not part
 // of the client-writable set) so every yoyo gets a stable cross-device id.
-const INSERT_COLS = [...WRITE_COLS_C, 'uuid'];
+// `rev` marks the row's position in the sync change feed (see db.js nextRev).
+const INSERT_COLS = [...WRITE_COLS_C, 'uuid', 'rev'];
 const INSERT_SQL = `INSERT INTO yoyos (${INSERT_COLS.join(', ')}) VALUES (${INSERT_COLS.map((c) => `@${c}`).join(', ')})`;
 
 app.post('/api/yoyos', (req, res) => {
@@ -457,7 +464,11 @@ app.post('/api/yoyos', (req, res) => {
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
   y.uuid = crypto.randomUUID();
-  const info = db.prepare(INSERT_SQL).run(y);
+  let info;
+  db.transaction(() => {
+    y.rev = nextRev();
+    info = db.prepare(INSERT_SQL).run(y);
+  })();
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(decorate(row));
 });
@@ -470,9 +481,11 @@ app.put('/api/yoyos/:id', (req, res) => {
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
   const assignments = WRITE_COLS_C.map((c) => `${c} = @${c}`).join(', ');
-  db.prepare(
-    `UPDATE yoyos SET ${assignments}, updated_at = datetime('now') WHERE id = @id`
-  ).run({ ...y, id: Number(req.params.id) });
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE yoyos SET ${assignments}, updated_at = datetime('now'), rev = @rev WHERE id = @id`
+    ).run({ ...y, rev: nextRev(), id: Number(req.params.id) });
+  })();
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);
   res.json(decorate(row));
 });
@@ -493,12 +506,20 @@ app.delete('/api/yoyos/:id', (req, res) => {
   // to other devices on sync, rather than re-appearing from a device that still has it.
   db.transaction(() => {
     db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(req.params.id);
-    db.prepare("UPDATE yoyos SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    db.prepare("UPDATE yoyos SET deleted_at = datetime('now'), updated_at = datetime('now'), rev = ? WHERE id = ?")
+      .run(nextRev(), req.params.id);
   })();
   res.json({ ok: true });
 });
 
 // ---- API: photos ----
+
+// Photo changes ride the parent yoyo through sync (its photo manifest), so
+// every photo mutation must look like an edit to the parent: bump updated_at
+// and give the row a fresh change-feed position.
+function touchYoyo(id) {
+  db.prepare("UPDATE yoyos SET updated_at = datetime('now'), rev = ? WHERE id = ?").run(nextRev(), id);
+}
 
 app.post('/api/yoyos/:id/photos', upload.array('photos', 12), async (req, res) => {
   const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
@@ -510,11 +531,12 @@ app.post('/api/yoyos/:id/photos', upload.array('photos', 12), async (req, res) =
   let order = maxRow.m + 1;
 
   const insert = db.prepare(
-    'INSERT INTO photos (yoyo_id, filename, sort_order) VALUES (?, ?, ?)'
+    'INSERT INTO photos (yoyo_id, uuid, filename, sort_order) VALUES (?, ?, ?, ?)'
   );
   const files = req.files || [];
   const tx = db.transaction((fs2) => {
-    for (const file of fs2) insert.run(req.params.id, file.filename, order++);
+    for (const file of fs2) insert.run(req.params.id, crypto.randomUUID(), file.filename, order++);
+    touchYoyo(req.params.id);
   });
   tx(files);
 
@@ -527,7 +549,10 @@ app.post('/api/yoyos/:id/photos', upload.array('photos', 12), async (req, res) =
 app.delete('/api/photos/:photoId', (req, res) => {
   const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(req.params.photoId);
   if (!photo) return res.status(404).json({ error: 'Not found' });
-  db.prepare('DELETE FROM photos WHERE id = ?').run(req.params.photoId);
+  db.transaction(() => {
+    db.prepare('DELETE FROM photos WHERE id = ?').run(req.params.photoId);
+    touchYoyo(photo.yoyo_id);
+  })();
   fs.rm(path.join(UPLOAD_DIR, photo.filename), { force: true }, () => {});
   fs.rm(path.join(UPLOAD_DIR, thumbName(photo.filename)), { force: true }, () => {});
   res.json({ ok: true });
@@ -551,8 +576,226 @@ app.put('/api/yoyos/:id/photos/order', (req, res) => {
   if (!yoyo) return res.status(404).json({ error: 'Not found' });
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n) => Number.isFinite(n)) : [];
   const upd = db.prepare('UPDATE photos SET sort_order = ? WHERE id = ? AND yoyo_id = ?');
-  db.transaction(() => { ids.forEach((pid, i) => upd.run(i, pid, req.params.id)); })();
+  db.transaction(() => {
+    ids.forEach((pid, i) => upd.run(i, pid, req.params.id));
+    touchYoyo(req.params.id);
+  })();
   res.json(decorate(db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id)));
+});
+
+// ---- API: sync (native apps) ----
+// Hub-and-spoke sync: apps pull rows changed since a rev cursor (tombstones
+// included), push batched uuid-keyed upserts resolved by last-writer-wins on
+// updated_at, and transfer photo files incrementally. See yoyo-ios-plan.md.
+
+const SQL_TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const MANIFEST_EXTS = new Set(['jpg', 'png', 'webp', 'gif']);
+
+// Same shape as SQLite's datetime('now') so string comparisons stay valid.
+function nowSql() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function currentRev() {
+  return Number(db.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get().value);
+}
+
+// Accepts only well-formed "YYYY-MM-DD HH:MM:SS"; clamps timestamps more than
+// 5 minutes in the future (a skewed device clock must not win conflicts forever).
+function acceptTimestamp(ts, now) {
+  if (!SQL_TS_RE.test(String(ts || ''))) return null;
+  const max = new Date(Date.now() + 5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  if (ts > max) { console.warn(`sync: clamped future timestamp ${ts}`); return now; }
+  return ts;
+}
+
+// Sync stores custom keys as-is (the app is a first-class writer and may carry
+// keys the web has no field_defs for) — shape-check only, unlike sanitizeCustom.
+function sanitizeSyncCustom(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (typeof k !== 'string' || !k || k.length > 60) continue;
+    if (!['string', 'number', 'boolean'].includes(typeof v)) continue;
+    out[k] = v;
+    if (Object.keys(out).length >= 50) break;
+  }
+  return out;
+}
+
+app.get('/api/sync/changes', (req, res) => {
+  // GETs bypass the write gate, and this payload includes owner-only fields.
+  if (!isLoggedIn(req)) return res.status(401).json({ error: 'Please sign in to sync.' });
+  const since = Math.max(0, Number(req.query.since) || 0);
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+
+  const rows = db.prepare('SELECT * FROM yoyos WHERE rev > ? ORDER BY rev LIMIT ?').all(since, limit);
+  const photosFor = db.prepare('SELECT uuid, filename, sort_order FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id');
+  const yoyos = rows.map((r) => {
+    let custom = {};
+    try { custom = JSON.parse(r.custom || '{}'); } catch { /* ignore bad JSON */ }
+    const photos = r.deleted_at ? [] : photosFor.all(r.id).map((p) => ({
+      uuid: p.uuid,
+      sort_order: p.sort_order,
+      url: `/uploads/${p.filename}`,
+      thumb_url: `/uploads/${thumbName(p.filename)}`,
+    }));
+    return { ...r, custom, photos };
+  });
+
+  res.json({
+    serverTime: nowSql(),
+    latestRev: currentRev(),
+    hasMore: rows.length === limit,
+    yoyos,
+  });
+});
+
+const SYNC_UPSERT_COLS = [...WRITE_COLS_C, 'uuid', 'created_at', 'updated_at', 'deleted_at', 'rev'];
+const SYNC_INSERT_SQL = `INSERT INTO yoyos (${SYNC_UPSERT_COLS.join(', ')}) VALUES (${SYNC_UPSERT_COLS.map((c) => `@${c}`).join(', ')})`;
+const SYNC_UPDATE_SQL = `UPDATE yoyos SET ${[...WRITE_COLS_C, 'updated_at', 'deleted_at'].map((c) => `${c} = @${c}`).join(', ')}, rev = @rev WHERE id = @id`;
+
+// Reconciles a live yoyo's photo rows against a pushed manifest
+// [{uuid, sort_order, ext}]. Returns the uuids whose files the client must
+// upload (rows exist so other devices see the manifest; bytes follow).
+function applyPhotoManifest(yoyoId, manifest) {
+  const missing = [];
+  const entries = [];
+  for (const m of Array.isArray(manifest) ? manifest : []) {
+    if (!UUID_RE.test(String(m?.uuid || ''))) continue;
+    const ext = MANIFEST_EXTS.has(String(m?.ext || '').toLowerCase()) ? String(m.ext).toLowerCase() : 'jpg';
+    entries.push({ uuid: m.uuid, sort_order: Number(m.sort_order) || 0, ext });
+  }
+  const keep = new Set(entries.map((e) => e.uuid));
+  for (const p of db.prepare('SELECT * FROM photos WHERE yoyo_id = ?').all(yoyoId)) {
+    if (keep.has(p.uuid)) continue;
+    db.prepare('DELETE FROM photos WHERE id = ?').run(p.id);
+    fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
+    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+  }
+  for (const e of entries) {
+    const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(e.uuid);
+    if (row) {
+      if (row.yoyo_id !== yoyoId) continue; // uuid belongs to another yoyo — ignore
+      db.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').run(e.sort_order, row.id);
+      if (!fs.existsSync(path.join(UPLOAD_DIR, row.filename))) missing.push(e.uuid);
+    } else {
+      db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, sort_order) VALUES (?, ?, ?, ?)')
+        .run(yoyoId, e.uuid, `${e.uuid}.${e.ext}`, e.sort_order);
+      missing.push(e.uuid);
+    }
+  }
+  return missing;
+}
+
+app.post('/api/sync/push', (req, res) => {
+  const incoming = Array.isArray(req.body?.yoyos) ? req.body.yoyos : null;
+  if (!incoming) return res.status(400).json({ error: 'Body must be { yoyos: [...] }.' });
+  if (incoming.length > 50) return res.status(400).json({ error: 'Batch too large (max 50 records).' });
+
+  const now = nowSql();
+  const results = [];
+
+  db.transaction(() => {
+    for (const rec of incoming) {
+      const uuid = String(rec?.uuid || '');
+      if (!UUID_RE.test(uuid)) { results.push({ uuid, applied: false, reason: 'bad-uuid' }); continue; }
+      const updatedAt = acceptTimestamp(rec.updated_at, now);
+      if (!updatedAt) { results.push({ uuid, applied: false, reason: 'bad-timestamp' }); continue; }
+      const deletedAt = rec.deleted_at == null ? null : acceptTimestamp(rec.deleted_at, now);
+      const createdAt = acceptTimestamp(rec.created_at, now) || now;
+
+      const y = sanitizeYoyo(rec);
+      const customObj = sanitizeSyncCustom(rec.custom);
+      growSelectOptions(customObj);
+      y.custom = JSON.stringify(customObj);
+
+      const existing = db.prepare('SELECT * FROM yoyos WHERE uuid = ?').get(uuid);
+      if (existing) {
+        // Last-writer-wins: strictly newer applies; ties go to the server (the
+        // loser's device marks itself clean and re-pulls the winning copy).
+        if (updatedAt <= existing.updated_at) {
+          results.push({ uuid, applied: false, reason: 'server-newer' });
+          continue;
+        }
+        // A pushed delete mirrors DELETE /api/yoyos/:id — photo files go now.
+        if (deletedAt && !existing.deleted_at) {
+          for (const p of db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id)) {
+            fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
+            fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+          }
+          db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(existing.id);
+        }
+        const rev = nextRev();
+        db.prepare(SYNC_UPDATE_SQL).run({ ...y, updated_at: updatedAt, deleted_at: deletedAt, rev, id: existing.id });
+        const missingPhotos = (!deletedAt && rec.photos !== undefined)
+          ? applyPhotoManifest(existing.id, rec.photos) : [];
+        results.push({ uuid, applied: true, rev, missingPhotos });
+      } else {
+        // New to the server. Tombstones insert too: a device that still holds
+        // the record must learn about the delete on its next pull.
+        const rev = nextRev();
+        const info = db.prepare(SYNC_INSERT_SQL).run({
+          ...y, uuid, created_at: createdAt, updated_at: updatedAt, deleted_at: deletedAt, rev,
+        });
+        const missingPhotos = (!deletedAt && rec.photos !== undefined)
+          ? applyPhotoManifest(info.lastInsertRowid, rec.photos) : [];
+        results.push({ uuid, applied: true, rev, missingPhotos });
+      }
+    }
+  })();
+
+  res.json({ serverTime: nowSql(), latestRev: currentRev(), results });
+});
+
+// Receives the bytes for one photo the client was told is missing. The row
+// (created by push) maps uuid -> filename; the parent gets a rev-only bump so
+// other devices re-pull and fetch the now-present file — no updated_at bump,
+// because the manifest edit already synced and this must not look like a new
+// conflicting edit.
+const uploadSyncPhoto = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => cb(null, `${req.params.photoUuid}${EXT_BY_MIME[file.mimetype] || '.jpg'}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_TYPES.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Only image files are allowed (jpg, png, webp, gif).'));
+  },
+});
+
+app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
+  // Validate BEFORE multer touches the filesystem — the uuid becomes a filename.
+  if (!UUID_RE.test(req.params.yoyoUuid) || !UUID_RE.test(req.params.photoUuid)) {
+    return res.status(400).json({ error: 'Bad identifier.' });
+  }
+  next();
+}, uploadSyncPhoto.single('photo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No photo uploaded.' });
+  const yoyo = db.prepare('SELECT id FROM yoyos WHERE uuid = ? AND deleted_at IS NULL').get(req.params.yoyoUuid);
+  if (!yoyo) {
+    fs.rmSync(req.file.path, { force: true });
+    return res.status(404).json({ error: 'Yoyo not found.' });
+  }
+
+  let rev;
+  db.transaction(() => {
+    const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(req.params.photoUuid);
+    if (row && row.yoyo_id === yoyo.id) {
+      db.prepare('UPDATE photos SET filename = ? WHERE id = ?').run(req.file.filename, row.id);
+    } else if (!row) {
+      const maxRow = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM photos WHERE yoyo_id = ?').get(yoyo.id);
+      db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, sort_order) VALUES (?, ?, ?, ?)')
+        .run(yoyo.id, req.params.photoUuid, req.file.filename, maxRow.m + 1);
+    }
+    rev = nextRev();
+    db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?').run(rev, yoyo.id);
+  })();
+
+  await makeThumb(req.file.filename).catch((e) => console.error('thumb error:', e.message));
+  res.json({ ok: true, url: `/uploads/${req.file.filename}`, rev });
 });
 
 // ---- API: config ----
@@ -851,7 +1094,7 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
   const hasCustomCols = presentCustomKeys.length > 0;
   const updateAssign = [...updateCols.map((c) => `${c} = @${c}`), ...(hasCustomCols ? ['custom = @custom'] : [])];
   const updateSql = updateAssign.length
-    ? db.prepare(`UPDATE yoyos SET ${updateAssign.join(', ')}, updated_at = datetime('now') WHERE id = @id`)
+    ? db.prepare(`UPDATE yoyos SET ${updateAssign.join(', ')}, updated_at = datetime('now'), rev = @rev WHERE id = @id`)
     : null;
 
   const truthy = (v) => /^(x|1|true|yes|y|★|favou?rite)$/i.test(String(v ?? '').trim());
@@ -893,7 +1136,7 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
 
       if (id && findSql.get(id)) {
         if (updateSql) {
-          const params = { id };
+          const params = { id, rev: nextRev() };
           for (const c of updateCols) params[c] = y[c];
           if (hasCustomCols) {
             let existing = {};
@@ -905,6 +1148,7 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
         updated++;
       } else {
         y.uuid = crypto.randomUUID();
+        y.rev = nextRev();
         insertSql.run(y);
         created++;
       }
@@ -987,10 +1231,17 @@ app.post('/api/restore', uploadZip.single('file'), (req, res) => {
     db.prepare('DELETE FROM yoyos').run(); // cascades to photos
     for (const r of yoyoRows) insertFrom('yoyos', yoyoCols, r);
     for (const p of photoRows) insertFrom('photos', photoCols, p);
+    // Restored rows carry stale or absent revs; re-stamp every row with a fresh
+    // change-feed position so sync clients re-pull the whole (replaced)
+    // collection. Photo files still match by uuid, so blobs aren't re-fetched.
+    for (const row of db.prepare('SELECT id FROM yoyos ORDER BY updated_at, id').all()) {
+      db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?').run(nextRev(), row.id);
+    }
   })();
   // A backup made before the uuid column existed restores rows without one —
   // give those a stable id so the unique index holds and they can sync later.
   backfillUuids(db);
+  backfillPhotoUuids(db);
 
   // Restore photo files (basename only — never trust paths inside the zip).
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });

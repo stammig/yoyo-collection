@@ -61,8 +61,10 @@ CREATE TABLE IF NOT EXISTS yoyos (
   favorite        INTEGER NOT NULL DEFAULT 0,
   retired         INTEGER NOT NULL DEFAULT 0, -- discontinued / limited run (paid may exceed retail)
   deleted_at      TEXT,                       -- soft-delete tombstone; NULL = live. Deletes are kept as
-                                              -- tombstones so a future sync could propagate them instead
-                                              -- of a stale copy resurrecting the row.
+                                              -- tombstones so sync propagates them instead of a stale
+                                              -- copy resurrecting the row.
+  rev             INTEGER NOT NULL DEFAULT 0, -- sync change-feed position (global counter in settings.sync_rev;
+                                              -- stamped on every write, index created in db.js)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -81,6 +83,7 @@ CREATE TABLE IF NOT EXISTS field_defs (
 CREATE TABLE IF NOT EXISTS photos (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   yoyo_id     INTEGER NOT NULL,
+  uuid        TEXT,                        -- stable cross-device id for sync (unique index created in db.js)
   filename    TEXT NOT NULL,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (yoyo_id) REFERENCES yoyos(id) ON DELETE CASCADE

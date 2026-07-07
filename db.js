@@ -135,4 +135,51 @@ export function backfillUuids(database) {
   return rows.length;
 }
 
+// ---- Sync support: photo uuids + revision cursor ----
+
+// Photos get the same stable cross-device identity yoyos have — sync manifests
+// key photos by uuid. Existing filenames are untouched so /uploads URLs stay
+// valid; only photos pushed from a device are named <uuid>.<ext>.
+const photoCols = db.prepare('PRAGMA table_info(photos)').all().map((c) => c.name);
+if (!photoCols.includes('uuid')) {
+  db.exec('ALTER TABLE photos ADD COLUMN uuid TEXT');
+}
+backfillPhotoUuids(db);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_uuid ON photos(uuid)');
+
+// Assign a UUID to every photo that lacks one. Exported so the restore endpoint
+// can re-run it after importing rows from a pre-sync backup.
+export function backfillPhotoUuids(database) {
+  const rows = database.prepare("SELECT id FROM photos WHERE uuid IS NULL OR uuid = ''").all();
+  if (!rows.length) return 0;
+  const setUuid = database.prepare('UPDATE photos SET uuid = ? WHERE id = ?');
+  database.transaction((rs) => { for (const r of rs) setUuid.run(crypto.randomUUID(), r.id); })(rows);
+  return rows.length;
+}
+
+// Monotonic revision cursor for sync: every server write stamps its row with
+// the next value of a global counter (settings.sync_rev), and clients pull
+// `WHERE rev > since`. Revs order the change feed; updated_at timestamps only
+// resolve conflicts. On the first boot with sync, existing rows get distinct
+// revs in edit order so a fresh client can page through history.
+if (!yoyoCols.includes('rev')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN rev INTEGER NOT NULL DEFAULT 0');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_yoyos_rev ON yoyos(rev)');
+if (!db.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get()) {
+  const rows = db.prepare('SELECT id FROM yoyos ORDER BY updated_at, id').all();
+  const setRev = db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?');
+  db.transaction(() => {
+    rows.forEach((r, i) => setRev.run(i + 1, r.id));
+    db.prepare("INSERT INTO settings (key, value) VALUES ('sync_rev', ?)").run(String(rows.length));
+  })();
+}
+
+// Returns the next global revision. Call inside the surrounding write
+// transaction so the bump commits or rolls back with the row it stamps.
+export function nextRev(database = db) {
+  database.prepare("UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'sync_rev'").run();
+  return Number(database.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get().value);
+}
+
 export default db;
