@@ -95,7 +95,21 @@ const SVG = {
   feather: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5C12 5 7 9 6 16l-2 3"/><path d="M9 14h7"/><path d="M13 6l5 5"/></svg>',
   dots: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>',
+  external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M18 14v6H4V6h6"/></svg>',
 };
+
+// Guesses the carrier from a tracking number's shape (same patterns as
+// detectCarrier in carriers.js) and returns a link to that carrier's public
+// tracking page — no API key needed, since it's the same page anyone gets by
+// typing a tracking number into the carrier's own site. Falls back to USPS
+// for anything unrecognized, since that's what most sellers ship with.
+function carrierTrackingURL(tracking) {
+  const s = String(tracking || '').replace(/\s+/g, '').toUpperCase();
+  if (!s) return null;
+  if (/^1Z[0-9A-Z]{16}$/.test(s)) return `https://www.ups.com/track?tracknum=${encodeURIComponent(s)}`;
+  if (/^\d{12}$/.test(s) || /^\d{15}$/.test(s)) return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(s)}`;
+  return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(s)}`;
+}
 
 // Hidden from public viewers (financial, shipping, ownership status).
 const SENSITIVE = new Set(['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value']);
@@ -1203,6 +1217,10 @@ function arrivalRow(y, sub) {
   const queryBtn = trackingEnabledState
     ? `<button class="btn btn-ghost btn-sm arr-query" data-track-query="${y.id}" title="Look up ETA from the carrier">${SVG.box}<span>Query ETA</span></button>`
     : '';
+  const trackURL = carrierTrackingURL(y.tracking);
+  const trackLink = trackURL
+    ? `<a class="btn btn-ghost btn-sm" href="${esc(trackURL)}" target="_blank" rel="noopener" title="Open this tracking number on the carrier's site">${SVG.external}<span>Track</span></a>`
+    : '';
   return `<div class="arrival-row" data-arr="${y.id}">${thumbHTML(y, 'arrival-thumb')}` +
     `<div class="arrival-main">` +
       `<div class="arrival-name">${esc(y.brand)} ${esc(y.model)}</div>` +
@@ -1211,6 +1229,7 @@ function arrivalRow(y, sub) {
         `<input class="arr-field arr-track" data-track-input="${y.id}" value="${esc(y.tracking || '')}" placeholder="Tracking number" />` +
         `<input class="arr-field arr-eta" type="date" data-eta-input="${y.id}" value="${toDateInputValue(y.eta)}" />` +
         queryBtn +
+        trackLink +
       `</div>` +
     `</div>` +
     `<button class="arrival-mark" data-arrived="${y.id}" title="Mark as in hand">${SVG.check}<span>Arrived</span></button></div>`;
