@@ -224,7 +224,7 @@ body:not(.embed) .app-shell { min-height: 100vh; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text); }
 .btn-ghost:hover { background: var(--hover); }
-.btn-ghost[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.btn-ghost[aria-pressed="true"], .btn-ghost.active { background: var(--accent-soft); color: var(--accent); }
 .btn-danger { background: transparent; border-color: transparent; color: var(--danger); box-shadow: none; }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .btn-sm { padding: 3px 10px; font-size: 0.78rem; }
