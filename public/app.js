@@ -1394,20 +1394,10 @@ function saleNotesHTML() {
   }
   return saleNotes ? `<div class="sale-notes">${esc(saleNotes).replace(/\n/g, '<br>')}</div>` : '';
 }
-// Renders the public For Sale page: shipping/sale notes, then a grid of every
-// yoyo whose sale_status is For Sale / For Trade / For Sale or Trade.
-function renderSale() {
-  const wrap = $('#viewSale');
-  const items = yoyos.filter((y) => isForSale(y.sale_status))
-    .sort((a, b) => String(a.brand || '').localeCompare(String(b.brand || '')) || String(a.model || '').localeCompare(String(b.model || '')));
-  const body = items.length
-    ? `<p class="sale-intro">${items.length} yoyo${items.length === 1 ? '' : 's'} available — tap any for full specs and photos.</p>`
-      + `<div class="sale-grid">${items.map(saleCardHTML).join('')}</div>`
-    : '<div class="insight-note">Nothing listed for sale or trade right now — check back soon.</div>';
-  wrap.innerHTML = saleNotesHTML() + body;
-
+function wireSaleNotesSave() {
   const saveBtn = $('#saveSaleNotes');
-  if (saveBtn) saveBtn.addEventListener('click', async () => {
+  if (!saveBtn) return;
+  saveBtn.addEventListener('click', async () => {
     const val = $('#saleNotesInput').value;
     saveBtn.disabled = true;
     try {
@@ -1417,11 +1407,375 @@ function renderSale() {
     } catch (err) { toast(err.message, 'error'); }
     saveBtn.disabled = false;
   });
-  wrap.querySelectorAll('.sale-card[data-id]').forEach((el) => {
-    const id = Number(el.dataset.id);
-    el.addEventListener('click', () => openDetail(id));
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id); } });
+}
+
+// ---- Seller tools (owner-only: bulk actions, sort/filter/views, listing text) ----
+// Independent of the Collection tab's `filters`/`selectMode` so browsing one
+// page never disturbs the other's state.
+let saleView = loadSaleView();
+function loadSaleView() {
+  const defaults = { mode: 'tile', sort: 'listed', sortDir: 'desc', status: '', q: '' };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem('yoyoSaleView') || '{}') }; }
+  catch { return defaults; }
+}
+function saveSaleView() { try { localStorage.setItem('yoyoSaleView', JSON.stringify(saleView)); } catch { /* ignore */ } }
+let saleSelectMode = false;
+const saleSelectedIds = new Set();
+
+// Days since a listing first went live (sale_listed_at is stamped server-side
+// — see server.js — the moment sale_status first becomes a for-sale value).
+// Null when never listed or the timestamp predates this feature.
+function daysListed(y) {
+  if (!y.sale_listed_at) return null;
+  const ms = Date.now() - new Date(y.sale_listed_at).getTime();
+  return Math.max(0, Math.floor(ms / 86400000));
+}
+const STALE_DAYS = 30; // flagged in the UI as a candidate for a price drop
+
+function saleFilteredSorted() {
+  let list = yoyos.filter((y) => isForSale(y.sale_status));
+  const q = saleView.q.trim().toLowerCase();
+  if (q) list = list.filter((y) => [y.brand, y.model, y.color, y.composition].join(' ').toLowerCase().includes(q));
+  if (saleView.status) list = list.filter((y) => y.sale_status === saleView.status);
+  const flip = saleView.sortDir === 'desc' ? -1 : 1;
+  list.sort((a, b) => {
+    let r;
+    switch (saleView.sort) {
+      case 'price': r = (a.sale_price ?? -1) - (b.sale_price ?? -1); break;
+      case 'listed': r = (daysListed(a) ?? -1) - (daysListed(b) ?? -1); break;
+      case 'model': r = String(a.model || '').localeCompare(String(b.model || '')); break;
+      default: r = String(a.brand || '').localeCompare(String(b.brand || ''));
+    }
+    if (r === 0) r = String(a.brand || '').localeCompare(String(b.brand || ''));
+    return r * flip;
   });
+  return list;
+}
+
+// A copy-paste-ready block for one listing: title, specs, price, description.
+function listingText(y) {
+  const lines = [`${y.brand} ${y.model}`.trim()];
+  const specs = [y.color, y.composition, y.condition].filter(Boolean).join(' · ');
+  if (specs) lines.push(specs);
+  const dims = [y.weight_g ? `${y.weight_g}g` : null, y.diameter_mm ? `${y.diameter_mm}mm` : null].filter(Boolean).join(' / ');
+  if (dims) lines.push(dims);
+  const wantsTrade = y.sale_status !== 'For Sale';
+  lines.push(y.sale_price != null
+    ? `${money(y.sale_price)}${wantsTrade ? ' (or trade)' : ''}`
+    : (wantsTrade ? 'Open to trade' : 'Price: ask'));
+  if (y.description) lines.push(y.description.trim());
+  return lines.join('\n');
+}
+function copyListingText(ids) {
+  const items = ids.map((id) => yoyos.find((y) => y.id === id)).filter(Boolean);
+  if (!items.length) return;
+  const text = items.map(listingText).join('\n\n---\n\n');
+  navigator.clipboard.writeText(text).then(
+    () => toast(`Copied listing text for ${items.length} yoyo${items.length === 1 ? '' : 's'}.`, 'ok'),
+    () => toast('Could not copy to clipboard.', 'error'),
+  );
+}
+
+function saleStatsHTML(items) {
+  const withPrice = items.filter((y) => y.sale_price != null);
+  const total = withPrice.reduce((s, y) => s + y.sale_price, 0);
+  const days = items.map(daysListed).filter((d) => d != null);
+  const avgDays = days.length ? Math.round(days.reduce((s, d) => s + d, 0) / days.length) : null;
+  const stale = items.filter((y) => (daysListed(y) ?? -1) >= STALE_DAYS).length;
+  return `
+    <div class="stat-card"><div class="stat-num">${items.length}</div><div class="stat-label">Listed</div></div>
+    <div class="stat-card"><div class="stat-num">${money0(total)}</div><div class="stat-label">Total asking</div></div>
+    ${avgDays != null ? `<div class="stat-card"><div class="stat-num">${avgDays}d</div><div class="stat-label">Avg days listed</div></div>` : ''}
+    ${items.length - withPrice.length ? `<div class="stat-card"><div class="stat-num">${items.length - withPrice.length}</div><div class="stat-label">No price set</div></div>` : ''}
+    ${stale ? `<div class="stat-card filtered"><div class="stat-num">${stale}</div><div class="stat-label">Stale (${STALE_DAYS}+ days)</div></div>` : ''}`;
+}
+
+function saleDaysBadge(y) {
+  const d = daysListed(y);
+  if (d == null) return '';
+  return `<span class="sale-days ${d >= STALE_DAYS ? 'stale' : ''}">${d}d</span>`;
+}
+function ownerSaleCardHTML(y) {
+  const thumb = y.photos[0]
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    : '<span class="placeholder"></span>';
+  const wantsTrade = y.sale_status !== 'For Sale';
+  const price = y.sale_price != null ? money(y.sale_price) : (wantsTrade ? 'Open to trade' : 'No price set');
+  const selBox = saleSelectMode ? `<span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span>` : '';
+  return `<article class="sale-card${saleSelectedIds.has(y.id) ? ' selected' : ''}" data-id="${y.id}">
+      <div class="sale-photo">${thumb}<span class="sale-badge ${saleBadgeClass(y.sale_status)}">${esc(y.sale_status)}</span>${saleDaysBadge(y)}${selBox}</div>
+      <div class="sale-body">
+        <div class="sale-brand">${esc(y.brand)}</div>
+        <div class="sale-model">${esc(y.model)}</div>
+        <div class="sale-price">${price}</div>
+        <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy listing text</button>
+      </div>
+    </article>`;
+}
+function ownerSaleRowsHTML(items) {
+  const rows = items.map((y) => {
+    const thumb = y.photos[0]
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      : '<span class="row-thumb placeholder"></span>';
+    const selCell = saleSelectMode ? `<span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span>` : '';
+    const d = daysListed(y);
+    return `<div class="sale-row${saleSelectedIds.has(y.id) ? ' selected' : ''}" data-id="${y.id}">
+        ${selCell}${thumb}
+        <div class="sale-row-main">
+          <div class="sale-row-name">${esc(y.brand)} ${esc(y.model)}</div>
+          <div class="sale-row-sub">${esc(y.sale_status)}${d != null ? ` · <span class="${d >= STALE_DAYS ? 'stale' : ''}">${d}d listed</span>` : ''}</div>
+        </div>
+        <div class="sale-row-price">${y.sale_price != null ? money(y.sale_price) : '—'}</div>
+        <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button>
+      </div>`;
+  }).join('');
+  return `<div class="sale-rows">${rows}</div>`;
+}
+function ownerSaleTableHTML(items) {
+  const arrow = (key) => (saleView.sort === key ? (saleView.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const th = (key, label, extra = '') => `<th class="sortable ${extra} ${saleView.sort === key ? 'sorted' : ''}" data-sale-sort="${key}">${esc(label)}${arrow(key)}</th>`;
+  const head = (saleSelectMode ? '<th class="col-sel"></th>' : '') +
+    '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') +
+    '<th>Status</th>' + th('price', 'Price', 'num') + th('listed', 'Days listed', 'num') + '<th></th>';
+  const rows = items.map((y) => {
+    const thumb = y.photos[0]
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      : '<span class="row-thumb placeholder"></span>';
+    const selCell = saleSelectMode ? `<td class="col-sel"><span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span></td>` : '';
+    const d = daysListed(y);
+    return `<tr data-id="${y.id}" class="${saleSelectedIds.has(y.id) ? 'selected' : ''}">
+        ${selCell}<td class="col-photo">${thumb}</td>
+        <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
+        <td>${esc(y.sale_status)}</td>
+        <td class="num">${y.sale_price != null ? money(y.sale_price) : '—'}</td>
+        <td class="num${d != null && d >= STALE_DAYS ? ' stale' : ''}">${d != null ? `${d}d` : '—'}</td>
+        <td><button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button></td>
+      </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function setSaleSelectMode(on) {
+  saleSelectMode = on;
+  if (!on) saleSelectedIds.clear();
+  syncSaleControls();
+  renderSaleBody();
+}
+function toggleSaleSelect(id) {
+  if (saleSelectedIds.has(id)) saleSelectedIds.delete(id); else saleSelectedIds.add(id);
+  renderSaleBody();
+}
+function renderSaleSelectionBar() {
+  let bar = $('#saleSelectionBar');
+  if (!saleSelectMode) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'saleSelectionBar'; bar.className = 'selection-bar'; document.body.appendChild(bar); }
+  const n = saleSelectedIds.size;
+  bar.innerHTML =
+    `<span class="sel-count">${n} selected</span>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="all">Select all</button>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="none" ${n ? '' : 'disabled'}>Clear</button>` +
+    `<span class="spacer"></span>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="price" ${n ? '' : 'disabled'}>Adjust price…</button>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="status" ${n ? '' : 'disabled'}>Change status…</button>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="copy" ${n ? '' : 'disabled'}>Copy listing text</button>` +
+    `<button type="button" class="btn btn-danger btn-sm" data-act="del" ${n ? '' : 'disabled'}>Delete</button>` +
+    `<button type="button" class="btn btn-ghost btn-sm" data-act="done">Done</button>`;
+  bar.querySelector('[data-act="all"]').onclick = () => { saleFilteredSorted().forEach((y) => saleSelectedIds.add(y.id)); renderSaleBody(); };
+  bar.querySelector('[data-act="none"]').onclick = () => { saleSelectedIds.clear(); renderSaleBody(); };
+  bar.querySelector('[data-act="price"]').onclick = () => openSaleDiscountDialog([...saleSelectedIds]);
+  bar.querySelector('[data-act="status"]').onclick = () => openSaleStatusDialog([...saleSelectedIds]);
+  bar.querySelector('[data-act="copy"]').onclick = () => copyListingText([...saleSelectedIds]);
+  bar.querySelector('[data-act="del"]').onclick = () => bulkDeleteSale([...saleSelectedIds]);
+  bar.querySelector('[data-act="done"]').onclick = () => setSaleSelectMode(false);
+}
+async function bulkDeleteSale(ids) {
+  if (!ids.length || demoGuard()) return;
+  if (!await confirmDialog({
+    title: `Delete ${ids.length} yoyo${ids.length === 1 ? '' : 's'}?`,
+    message: 'This removes them and their photos. This can’t be undone.', confirmText: 'Delete', danger: true,
+  })) return;
+  let ok = 0;
+  for (const id of ids) { try { await api(`/api/yoyos/${id}`, { method: 'DELETE' }); ok++; } catch { /* keep going */ } }
+  setSaleSelectMode(false);
+  await loadAll();
+  toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}.`, 'ok');
+}
+
+// Simple modal scaffold shared by the two bulk dialogs below (mirrors openBulkEdit's pattern).
+function saleDialog(titleHTML, bodyHTML, onApply) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal';
+  const card = document.createElement('div');
+  card.className = 'modal-card modal-sm';
+  card.innerHTML =
+    `<div class="modal-head"><h2>${titleHTML}</h2></div>` +
+    `<div class="form"><div class="form-section">${bodyHTML}</div></div>` +
+    `<div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-ghost" data-act="cancel">Cancel</button><button type="button" class="btn btn-primary" data-act="apply">Apply</button></div>`;
+  const bd = document.createElement('div'); bd.className = 'modal-backdrop';
+  overlay.appendChild(bd); overlay.appendChild(card); document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  bd.onclick = close;
+  card.querySelector('[data-act="cancel"]').onclick = close;
+  card.querySelector('[data-act="apply"]').onclick = () => onApply(card, close);
+  return card;
+}
+function openSaleDiscountDialog(ids) {
+  if (!ids.length || demoGuard()) return;
+  saleDialog(
+    `Adjust price for ${ids.length} yoyo${ids.length === 1 ? '' : 's'}`,
+    `<div class="be-row"><label>Action</label><select id="discAction">` +
+      `<option value="pct-off-current">% off current price</option>` +
+      `<option value="pct-off-retail">% off retail</option>` +
+      `<option value="fixed">Set fixed price</option></select></div>` +
+    `<div class="be-row"><label>Value</label><input type="number" id="discValue" step="0.01" placeholder="e.g. 10" /></div>` +
+    `<p class="hint">"% off retail" only applies to items with a retail price on file; others are skipped.</p>`,
+    async (card, close) => {
+      const action = card.querySelector('#discAction').value;
+      const val = Number(card.querySelector('#discValue').value);
+      const validPct = action !== 'fixed' && val >= 0 && val <= 100;
+      const validFixed = action === 'fixed' && val >= 0;
+      if (!isFinite(val) || (!validPct && !validFixed)) {
+        toast(action === 'fixed' ? 'Enter a valid price.' : 'Enter a percentage between 0 and 100.', 'error');
+        return;
+      }
+      close();
+      let ok = 0, skip = 0;
+      for (const id of ids) {
+        const y = yoyos.find((x) => x.id === id);
+        if (!y) { skip++; continue; }
+        let newPrice;
+        if (action === 'fixed') newPrice = val;
+        else if (action === 'pct-off-current') {
+          if (y.sale_price == null) { skip++; continue; }
+          newPrice = Math.round(y.sale_price * (1 - val / 100) * 100) / 100;
+        } else {
+          if (y.retail == null) { skip++; continue; }
+          newPrice = Math.round(y.retail * (1 - val / 100) * 100) / 100;
+        }
+        try { await patchYoyo(id, { sale_price: newPrice }); ok++; } catch { skip++; }
+      }
+      setSaleSelectMode(false);
+      await loadAll();
+      toast(`Updated price on ${ok} yoyo${ok === 1 ? '' : 's'}${skip ? `, skipped ${skip}` : ''}.`, skip ? 'error' : 'ok');
+    },
+  );
+}
+function openSaleStatusDialog(ids) {
+  if (!ids.length || demoGuard()) return;
+  saleDialog(
+    `Change status for ${ids.length} yoyo${ids.length === 1 ? '' : 's'}`,
+    `<div class="be-row"><label>New status</label><select id="statusNew">` +
+      `<option value="For Sale">For Sale</option>` +
+      `<option value="For Trade">For Trade</option>` +
+      `<option value="For Sale or Trade">For Sale or Trade</option>` +
+      `<option value="Sold">Sold</option>` +
+      `<option value="">Unlist (not for sale)</option></select></div>`,
+    async (card, close) => {
+      const status = card.querySelector('#statusNew').value;
+      close();
+      const changes = { sale_status: status };
+      if (status === 'Sold') changes.sold_date = new Date().toISOString().slice(0, 10);
+      let ok = 0, fail = 0;
+      for (const id of ids) { try { await patchYoyo(id, changes); ok++; } catch { fail++; } }
+      setSaleSelectMode(false);
+      await loadAll();
+      toast(`Updated ${ok} yoyo${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}.`, fail ? 'error' : 'ok');
+    },
+  );
+}
+
+// Syncs the persistent toolbar controls' visible state from `saleView` — called
+// after any interaction, never rebuilds the controls themselves (they're static
+// markup in index.html) so focus/cursor position in the search box survives
+// every re-render.
+function syncSaleControls() {
+  $('#saleStats').classList.toggle('hidden', !canEditState);
+  $('#saleControls').classList.toggle('hidden', !canEditState);
+  if (!canEditState) return;
+  $('#saleSearch').value = saleView.q;
+  $('#saleStatusFilter').value = saleView.status;
+  $('#saleSort').value = saleView.sort;
+  $('#saleSortDir').textContent = saleView.sortDir === 'asc' ? '↑' : '↓';
+  document.querySelectorAll('#saleViewSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.saleView === saleView.mode));
+  $('#saleSelectBtn').classList.toggle('active', saleSelectMode);
+}
+// Re-renders just the stats + item list + selection bar (never the toolbar
+// itself) — the function every seller-tools interaction calls.
+function renderSaleBody() {
+  const body = $('#saleBody');
+  if (!canEditState) {
+    const items = yoyos.filter((y) => isForSale(y.sale_status))
+      .sort((a, b) => String(a.brand || '').localeCompare(String(b.brand || '')) || String(a.model || '').localeCompare(String(b.model || '')));
+    body.innerHTML = items.length
+      ? `<p class="sale-intro">${items.length} yoyo${items.length === 1 ? '' : 's'} available — tap any for full specs and photos.</p>`
+        + `<div class="sale-grid">${items.map(saleCardHTML).join('')}</div>`
+      : '<div class="insight-note">Nothing listed for sale or trade right now — check back soon.</div>';
+    body.querySelectorAll('.sale-card[data-id]').forEach((el) => {
+      const id = Number(el.dataset.id);
+      el.addEventListener('click', () => openDetail(id));
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id); } });
+    });
+    return;
+  }
+
+  const items = saleFilteredSorted();
+  $('#saleStats').innerHTML = saleStatsHTML(items);
+  if (!yoyos.some((y) => isForSale(y.sale_status))) {
+    body.innerHTML = '<div class="insight-note">Nothing listed yet. Mark a yoyo For Sale or For Trade to see it here.</div>';
+  } else if (!items.length) {
+    body.innerHTML = '<div class="insight-note">No listings match your search/filter.</div>';
+  } else if (saleView.mode === 'row') {
+    body.innerHTML = ownerSaleRowsHTML(items);
+  } else if (saleView.mode === 'table') {
+    body.innerHTML = ownerSaleTableHTML(items);
+  } else {
+    body.innerHTML = `<div class="sale-grid">${items.map(ownerSaleCardHTML).join('')}</div>`;
+  }
+  body.querySelectorAll('[data-copy]').forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyListingText([Number(btn.dataset.copy)]);
+  }));
+  body.querySelectorAll('.sale-card[data-id], .sale-row[data-id], tr[data-id]').forEach((el) => {
+    const id = Number(el.dataset.id);
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-copy], .sel-box')) return;
+      if (saleSelectMode) { toggleSaleSelect(id); return; }
+      openDetail(id);
+    });
+  });
+  body.querySelectorAll('.sel-box[data-sale-sel]').forEach((box) => {
+    box.addEventListener('click', (e) => { e.stopPropagation(); toggleSaleSelect(Number(box.dataset.saleSel)); });
+  });
+  body.querySelectorAll('[data-sale-sort]').forEach((th) => th.addEventListener('click', () => {
+    const key = th.dataset.saleSort;
+    if (saleView.sort === key) saleView.sortDir = saleView.sortDir === 'asc' ? 'desc' : 'asc';
+    else { saleView.sort = key; saleView.sortDir = 'asc'; }
+    saveSaleView(); syncSaleControls(); renderSaleBody();
+  }));
+  renderSaleSelectionBar();
+}
+// One-time wiring for the persistent toolbar controls (mirrors the top-level
+// `$('#search').addEventListener(...)` pattern for the Collection tab) — see
+// the bottom of this file where it's invoked alongside that.
+function wireSaleControlsOnce() {
+  $('#saleSearch').addEventListener('input', (e) => { saleView.q = e.target.value; saveSaleView(); renderSaleBody(); });
+  $('#saleStatusFilter').addEventListener('change', (e) => { saleView.status = e.target.value; saveSaleView(); renderSaleBody(); });
+  $('#saleSort').addEventListener('change', (e) => { saleView.sort = e.target.value; saveSaleView(); renderSaleBody(); syncSaleControls(); });
+  $('#saleSortDir').addEventListener('click', () => { saleView.sortDir = saleView.sortDir === 'asc' ? 'desc' : 'asc'; saveSaleView(); syncSaleControls(); renderSaleBody(); });
+  document.querySelectorAll('#saleViewSeg .seg-btn').forEach((btn) => btn.addEventListener('click', () => {
+    saleView.mode = btn.dataset.saleView; saveSaleView(); syncSaleControls(); renderSaleBody();
+  }));
+  $('#saleSelectBtn').addEventListener('click', () => setSaleSelectMode(!saleSelectMode));
+}
+// Renders the For Sale page: shipping/sale notes, then either the public
+// storefront grid (visitors) or the full seller toolset (owner) — see
+// renderSaleBody() for the item list itself; this handles the toolbar/notes
+// and is only called on tab switch / full data reload, never per-keystroke.
+function renderSale() {
+  $('#saleNotesWrap').innerHTML = saleNotesHTML();
+  wireSaleNotesSave();
+  syncSaleControls();
+  renderSaleBody();
 }
 
 // ============================================================
@@ -2527,6 +2881,7 @@ $('#search').addEventListener('input', (e) => { filters.q = e.target.value; view
 $('#sort').addEventListener('change', (e) => { filters.sort = e.target.value; filters.sortDir = defaultDir(e.target.value); render(); });
 $('#sortDirBtn').addEventListener('click', () => { filters.sortDir = filters.sortDir === 'asc' ? 'desc' : 'asc'; render(); });
 $('#clearFilters').addEventListener('click', clearAllFilters);
+wireSaleControlsOnce();
 
 // Resets every filter (search, checkboxes, ranges) back to defaults.
 function clearAllFilters() {

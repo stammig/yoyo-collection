@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS yoyos (
   trade_value     REAL,                       -- value received if sold via trade (owner-only); NULL = cash sale
   sold_date       TEXT NOT NULL DEFAULT '',   -- when it sold (ISO date, owner-only)
   buyer           TEXT NOT NULL DEFAULT '',   -- who you sold it to (owner-only)
+  sale_listed_at  TEXT,                       -- server-stamped when sale_status first goes live (for "days listed"); owner-only
 
   -- Specs
   weight_g        REAL,

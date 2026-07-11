@@ -179,7 +179,34 @@
         <section id="viewArrivals" class="view hidden"></section>
 
         <!-- ============ For Sale ============ -->
-        <section id="viewSale" class="view hidden"></section>
+        <section id="viewSale" class="view hidden">
+          <div id="saleNotesWrap"></div>
+          <section class="stats hidden" id="saleStats"></section>
+          <div class="controls sale-controls hidden" id="saleControls">
+            <input type="search" id="saleSearch" class="search" aria-label="Search for-sale items" placeholder="Search brand, model, color…" />
+            <select id="saleStatusFilter" class="select select-sm" aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option value="For Sale">For Sale</option>
+              <option value="For Trade">For Trade</option>
+              <option value="For Sale or Trade">For Sale or Trade</option>
+            </select>
+            <select id="saleSort" class="select select-sm" aria-label="Sort by">
+              <option value="listed">Days listed</option>
+              <option value="price">Price</option>
+              <option value="brand">Brand</option>
+              <option value="model">Model</option>
+            </select>
+            <button type="button" id="saleSortDir" class="btn btn-ghost btn-sm" title="Toggle sort direction">↓</button>
+            <span class="spacer"></span>
+            <div class="seg" id="saleViewSeg" role="group" aria-label="Sale view mode">
+              <button type="button" class="seg-btn" data-sale-view="tile">Grid</button>
+              <button type="button" class="seg-btn" data-sale-view="row">List</button>
+              <button type="button" class="seg-btn" data-sale-view="table">Table</button>
+            </div>
+            <button type="button" id="saleSelectBtn" class="btn btn-ghost btn-sm">☑ Select</button>
+          </div>
+          <div id="saleBody"></div>
+        </section>
 
         <!-- ============ Sold ============ -->
         <section id="viewSold" class="view hidden"></section>

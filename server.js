@@ -337,6 +337,11 @@ function sanitizeYoyo(body) {
   return out;
 }
 
+// Statuses that count as "actively listed" — used to auto-stamp sale_listed_at
+// (see POST/PUT below) so the seller tools can sort/flag by days-listed
+// without the client ever having to manage that timestamp itself.
+const FOR_SALE_STATUSES = new Set(['For Sale', 'For Trade', 'For Sale or Trade']);
+
 // Discount inferred from retail vs. paid (e.g. 29.41), or null if not computable.
 function percentOff(y) {
   if (y.retail && y.retail > 0 && y.paid != null) {
@@ -429,7 +434,7 @@ function growSelectOptions(customObj) {
 }
 
 // Fields hidden from anyone who can't edit (public/read-only view).
-const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value'];
+const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value', 'sale_listed_at'];
 function publicSafe(y, editable) {
   if (editable) return y;
   const out = { ...y };
@@ -455,7 +460,8 @@ const WRITE_COLS_C = [...WRITE_COLS, 'custom'];
 // Columns written when creating a row. `uuid` is server-generated here (not part
 // of the client-writable set) so every yoyo gets a stable cross-device id.
 // `rev` marks the row's position in the sync change feed (see db.js nextRev).
-const INSERT_COLS = [...WRITE_COLS_C, 'uuid', 'rev'];
+// `sale_listed_at` is likewise server-managed (see below) rather than client-writable.
+const INSERT_COLS = [...WRITE_COLS_C, 'uuid', 'rev', 'sale_listed_at'];
 const INSERT_SQL = `INSERT INTO yoyos (${INSERT_COLS.join(', ')}) VALUES (${INSERT_COLS.map((c) => `@${c}`).join(', ')})`;
 
 app.post('/api/yoyos', (req, res) => {
@@ -464,6 +470,7 @@ app.post('/api/yoyos', (req, res) => {
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
   y.uuid = crypto.randomUUID();
+  y.sale_listed_at = FOR_SALE_STATUSES.has(y.sale_status) ? new Date().toISOString() : null;
   let info;
   db.transaction(() => {
     y.rev = nextRev();
@@ -474,16 +481,25 @@ app.post('/api/yoyos', (req, res) => {
 });
 
 app.put('/api/yoyos/:id', (req, res) => {
-  const existing = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  const existing = db.prepare('SELECT sale_status, sale_listed_at FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const y = sanitizeYoyo(req.body);
   const customObj = sanitizeCustom(req.body.custom);
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
+  // Stamp sale_listed_at the moment a yoyo first goes live (wasn't for-sale,
+  // now is); clear it on unlisting; otherwise leave it alone — this is what
+  // lets the seller tools sort/flag by "days listed" without the client
+  // needing to know or send this timestamp at all.
+  const wasListed = FOR_SALE_STATUSES.has(existing.sale_status);
+  const nowListed = FOR_SALE_STATUSES.has(y.sale_status);
+  y.sale_listed_at = nowListed
+    ? (wasListed ? existing.sale_listed_at : new Date().toISOString())
+    : (y.sale_status === '' ? null : existing.sale_listed_at);
   const assignments = WRITE_COLS_C.map((c) => `${c} = @${c}`).join(', ');
   db.transaction(() => {
     db.prepare(
-      `UPDATE yoyos SET ${assignments}, updated_at = datetime('now'), rev = @rev WHERE id = @id`
+      `UPDATE yoyos SET ${assignments}, sale_listed_at = @sale_listed_at, updated_at = datetime('now'), rev = @rev WHERE id = @id`
     ).run({ ...y, rev: nextRev(), id: Number(req.params.id) });
   })();
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);

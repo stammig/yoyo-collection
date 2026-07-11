@@ -100,6 +100,9 @@ if (!yoyoCols.includes('buyer')) {
 if (!yoyoCols.includes('market_value')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN market_value REAL');
 }
+if (!yoyoCols.includes('sale_listed_at')) {
+  db.exec('ALTER TABLE yoyos ADD COLUMN sale_listed_at TEXT');
+}
 for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) {
   if (!yoyoCols.includes(col)) {
     db.exec(`ALTER TABLE yoyos ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
