@@ -103,6 +103,14 @@ if (!yoyoCols.includes('market_value')) {
 if (!yoyoCols.includes('sale_listed_at')) {
   db.exec('ALTER TABLE yoyos ADD COLUMN sale_listed_at TEXT');
 }
+// Backfill for listings that predate sale_listed_at: without this the
+// "Days listed" column is a wall of "—" that reads as broken. Stamping "now"
+// means they show 0d today but age accurately from here on. Idempotent —
+// only ever fills NULL/empty on rows that are currently listed. (The native
+// app does the same one-time stamp on its side; values converge via sync.)
+db.exec(`UPDATE yoyos SET sale_listed_at = datetime('now')
+  WHERE sale_status IN ('For Sale', 'For Trade', 'For Sale or Trade')
+    AND (sale_listed_at IS NULL OR sale_listed_at = '')`);
 for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) {
   if (!yoyoCols.includes(col)) {
     db.exec(`ALTER TABLE yoyos ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);

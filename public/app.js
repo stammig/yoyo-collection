@@ -36,6 +36,9 @@ let currentView = 'collection'; // 'collection' | 'arrivals' | 'insights'
 function toast(message, kind = '') {
   const wrap = document.getElementById('toastWrap');
   if (!wrap) { console.warn(message); return; }
+  // Announce toasts to screen readers — they're the app's only feedback for
+  // most actions (saves, copies, bulk edits), so they can't be sight-only.
+  if (!wrap.hasAttribute('aria-live')) { wrap.setAttribute('aria-live', 'polite'); wrap.setAttribute('role', 'status'); }
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.innerHTML = `<span class="toast-dot"></span><span></span>`;
@@ -1466,14 +1469,18 @@ function listingText(y) {
   if (y.description) lines.push(y.description.trim());
   return lines.join('\n');
 }
-function copyListingText(ids) {
+async function copyListingText(ids) {
   const items = ids.map((id) => yoyos.find((y) => y.id === id)).filter(Boolean);
-  if (!items.length) return;
+  if (!items.length) return false;
   const text = items.map(listingText).join('\n\n---\n\n');
-  navigator.clipboard.writeText(text).then(
-    () => toast(`Copied listing text for ${items.length} yoyo${items.length === 1 ? '' : 's'}.`, 'ok'),
-    () => toast('Could not copy to clipboard.', 'error'),
-  );
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`Copied listing text for ${items.length} yoyo${items.length === 1 ? '' : 's'}.`, 'ok');
+    return true;
+  } catch {
+    toast('Could not copy to clipboard.', 'error');
+    return false;
+  }
 }
 
 function saleStatsHTML(items) {
@@ -1493,7 +1500,19 @@ function saleStatsHTML(items) {
 function saleDaysBadge(y) {
   const d = daysListed(y);
   if (d == null) return '';
-  return `<span class="sale-days ${d >= STALE_DAYS ? 'stale' : ''}">${d}d</span>`;
+  const stale = d >= STALE_DAYS;
+  // Stale carries a glyph + title, not just a color — color alone isn't a
+  // signal everyone can read, and the tooltip explains what the pill means.
+  return `<span class="sale-days ${stale ? 'stale' : ''}" title="Listed ${d} day${d === 1 ? '' : 's'}${stale ? ' — stale' : ''}" aria-label="Listed ${d} days${stale ? ', stale' : ''}">${stale ? '⚠ ' : ''}${d}d</span>`;
+}
+// Selection checkbox markup shared by the three owner sale views. Always
+// visible (matching the Collection tab's always-visible checkboxes) — the
+// first click on one enters selection mode implicitly, so bulk actions are
+// discoverable without hunting for the Bulk edit button first. Real checkbox
+// semantics (role/aria-checked/tabindex) so it works from the keyboard too.
+function saleSelBoxHTML(y) {
+  const sel = saleSelectedIds.has(y.id);
+  return `<span class="sel-box ${sel ? 'checked' : ''}" data-sale-sel="${y.id}" role="checkbox" aria-checked="${sel}" tabindex="0" aria-label="Select ${esc(y.brand)} ${esc(y.model)}"></span>`;
 }
 function ownerSaleCardHTML(y) {
   const thumb = y.photos[0]
@@ -1501,7 +1520,7 @@ function ownerSaleCardHTML(y) {
     : '<span class="placeholder"></span>';
   const wantsTrade = y.sale_status !== 'For Sale';
   const price = y.sale_price != null ? money(y.sale_price) : (wantsTrade ? 'Open to trade' : 'No price set');
-  const selBox = saleSelectMode ? `<span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span>` : '';
+  const selBox = saleSelBoxHTML(y);
   return `<article class="sale-card${saleSelectedIds.has(y.id) ? ' selected' : ''}" data-id="${y.id}">
       <div class="sale-photo">${thumb}<span class="sale-badge ${saleBadgeClass(y.sale_status)}">${esc(y.sale_status)}</span>${saleDaysBadge(y)}${selBox}</div>
       <div class="sale-body">
@@ -1517,13 +1536,14 @@ function ownerSaleRowsHTML(items) {
     const thumb = y.photos[0]
       ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
       : '<span class="row-thumb placeholder"></span>';
-    const selCell = saleSelectMode ? `<span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span>` : '';
+    const selCell = saleSelBoxHTML(y);
     const d = daysListed(y);
+    const staleR = d != null && d >= STALE_DAYS;
     return `<div class="sale-row${saleSelectedIds.has(y.id) ? ' selected' : ''}" data-id="${y.id}">
         ${selCell}${thumb}
         <div class="sale-row-main">
           <div class="sale-row-name">${esc(y.brand)} ${esc(y.model)}</div>
-          <div class="sale-row-sub">${esc(y.sale_status)}${d != null ? ` · <span class="${d >= STALE_DAYS ? 'stale' : ''}">${d}d listed</span>` : ''}</div>
+          <div class="sale-row-sub">${esc(y.sale_status)}${d != null ? ` · <span class="${staleR ? 'stale' : ''}" ${staleR ? `title="Listed ${d} days — stale"` : ''}>${staleR ? '⚠ ' : ''}${d}d listed</span>` : ''}</div>
         </div>
         <div class="sale-row-price">${y.sale_price != null ? money(y.sale_price) : '—'}</div>
         <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button>
@@ -1534,21 +1554,22 @@ function ownerSaleRowsHTML(items) {
 function ownerSaleTableHTML(items) {
   const arrow = (key) => (saleView.sort === key ? (saleView.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
   const th = (key, label, extra = '') => `<th class="sortable ${extra} ${saleView.sort === key ? 'sorted' : ''}" data-sale-sort="${key}">${esc(label)}${arrow(key)}</th>`;
-  const head = (saleSelectMode ? '<th class="col-sel"></th>' : '') +
+  const head = '<th class="col-sel"></th>' +
     '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') +
     '<th>Status</th>' + th('price', 'Price', 'num') + th('listed', 'Days listed', 'num') + '<th></th>';
   const rows = items.map((y) => {
     const thumb = y.photos[0]
       ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
       : '<span class="row-thumb placeholder"></span>';
-    const selCell = saleSelectMode ? `<td class="col-sel"><span class="sel-box ${saleSelectedIds.has(y.id) ? 'checked' : ''}" data-sale-sel="${y.id}"></span></td>` : '';
+    const selCell = `<td class="col-sel">${saleSelBoxHTML(y)}</td>`;
     const d = daysListed(y);
+    const staleT = d != null && d >= STALE_DAYS;
     return `<tr data-id="${y.id}" class="${saleSelectedIds.has(y.id) ? 'selected' : ''}">
         ${selCell}<td class="col-photo">${thumb}</td>
         <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
         <td>${esc(y.sale_status)}</td>
         <td class="num">${y.sale_price != null ? money(y.sale_price) : '—'}</td>
-        <td class="num${d != null && d >= STALE_DAYS ? ' stale' : ''}">${d != null ? `${d}d` : '—'}</td>
+        <td class="num${staleT ? ' stale' : ''}" ${staleT ? `title="Listed ${d} days — stale"` : ''}>${d != null ? `${staleT ? '⚠ ' : ''}${d}d` : '—'}</td>
         <td><button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button></td>
       </tr>`;
   }).join('');
@@ -1562,8 +1583,15 @@ function setSaleSelectMode(on) {
   renderSaleBody();
 }
 function toggleSaleSelect(id) {
+  // Checking a box outside selection mode enters it implicitly — the boxes
+  // are always visible, so the first click IS the intent to bulk-edit.
+  if (!saleSelectMode) { saleSelectMode = true; syncSaleControls(); }
   if (saleSelectedIds.has(id)) saleSelectedIds.delete(id); else saleSelectedIds.add(id);
+  const hadFocus = document.activeElement?.dataset?.saleSel != null;
   renderSaleBody();
+  // The re-render replaced the DOM node that had keyboard focus — put focus
+  // back on the same checkbox so arrowing/tabbing through the list survives.
+  if (hadFocus) document.querySelector(`.sel-box[data-sale-sel="${id}"]`)?.focus();
 }
 function renderSaleSelectionBar() {
   let bar = $('#saleSelectionBar');
@@ -1571,7 +1599,7 @@ function renderSaleSelectionBar() {
   if (!bar) { bar = document.createElement('div'); bar.id = 'saleSelectionBar'; bar.className = 'selection-bar'; document.body.appendChild(bar); }
   const n = saleSelectedIds.size;
   bar.innerHTML =
-    `<span class="sel-count">${n} selected</span>` +
+    `<span class="sel-count" aria-live="polite">${n} selected</span>` +
     `<button type="button" class="btn btn-ghost btn-sm" data-act="all">Select all</button>` +
     `<button type="button" class="btn btn-ghost btn-sm" data-act="none" ${n ? '' : 'disabled'}>Clear</button>` +
     `<span class="spacer"></span>` +
@@ -1602,21 +1630,33 @@ async function bulkDeleteSale(ids) {
 }
 
 // Simple modal scaffold shared by the two bulk dialogs below (mirrors openBulkEdit's pattern).
+// Keyboard-complete: first field autofocused, Enter applies, Escape cancels.
 function saleDialog(titleHTML, bodyHTML, onApply) {
   const overlay = document.createElement('div');
   overlay.className = 'modal';
   const card = document.createElement('div');
   card.className = 'modal-card modal-sm';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
+  card.setAttribute('aria-label', String(titleHTML).replace(/<[^>]*>/g, ''));
   card.innerHTML =
     `<div class="modal-head"><h2>${titleHTML}</h2></div>` +
     `<div class="form"><div class="form-section">${bodyHTML}</div></div>` +
     `<div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-ghost" data-act="cancel">Cancel</button><button type="button" class="btn btn-primary" data-act="apply">Apply</button></div>`;
   const bd = document.createElement('div'); bd.className = 'modal-backdrop';
   overlay.appendChild(bd); overlay.appendChild(card); document.body.appendChild(overlay);
-  const close = () => overlay.remove();
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.dataset?.act !== 'cancel') {
+      e.preventDefault(); onApply(card, close);
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
   bd.onclick = close;
   card.querySelector('[data-act="cancel"]').onclick = close;
   card.querySelector('[data-act="apply"]').onclick = () => onApply(card, close);
+  card.querySelector('input, select')?.focus();
   return card;
 }
 function openSaleDiscountDialog(ids) {
@@ -1731,9 +1771,14 @@ function renderSaleBody() {
   } else {
     body.innerHTML = `<div class="sale-grid">${items.map(ownerSaleCardHTML).join('')}</div>`;
   }
-  body.querySelectorAll('[data-copy]').forEach((btn) => btn.addEventListener('click', (e) => {
+  body.querySelectorAll('[data-copy]').forEach((btn) => btn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    copyListingText([Number(btn.dataset.copy)]);
+    if (!await copyListingText([Number(btn.dataset.copy)])) return;
+    // Feedback right where the eye already is, not just in the far-corner toast.
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
   }));
   body.querySelectorAll('.sale-card[data-id], .sale-row[data-id], tr[data-id]').forEach((el) => {
     const id = Number(el.dataset.id);
@@ -1745,6 +1790,9 @@ function renderSaleBody() {
   });
   body.querySelectorAll('.sel-box[data-sale-sel]').forEach((box) => {
     box.addEventListener('click', (e) => { e.stopPropagation(); toggleSaleSelect(Number(box.dataset.saleSel)); });
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSaleSelect(Number(box.dataset.saleSel)); }
+    });
   });
   body.querySelectorAll('[data-sale-sort]').forEach((th) => th.addEventListener('click', () => {
     const key = th.dataset.saleSort;
