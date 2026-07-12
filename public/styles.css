@@ -14,6 +14,7 @@
   --muted:        #86868b;
   --faint:        #aeaeb2;
   --border:       rgba(0,0,0,0.08);
+  --border-strong: rgba(0,0,0,0.35);
   --separator:    rgba(0,0,0,0.06);
   --hover:        rgba(0,0,0,0.045);
   --accent:       #5e5ce6;
@@ -48,6 +49,7 @@
     --muted:        #98989d;
     --faint:        #636366;
     --border:       rgba(255,255,255,0.10);
+    --border-strong: rgba(255,255,255,0.40);
     --separator:    rgba(255,255,255,0.08);
     --hover:        rgba(255,255,255,0.06);
     --accent:       #7d7aff;
@@ -73,6 +75,7 @@
   --muted:        #98989d;
   --faint:        #636366;
   --border:       rgba(255,255,255,0.10);
+  --border-strong: rgba(255,255,255,0.40);
   --separator:    rgba(255,255,255,0.08);
   --hover:        rgba(255,255,255,0.06);
   --accent:       #7d7aff;
@@ -340,6 +343,7 @@ input:focus, textarea:focus, .select:focus, .search:focus { border-color: var(--
   width: 22px; height: 22px; border-radius: 7px; background: rgba(255,255,255,0.9);
   border: 1.5px solid var(--border-strong); box-shadow: var(--shadow-sm); cursor: pointer;
 }
+.card .sel-box.checked { background: var(--accent); border-color: transparent; }
 body.read-only .card .sel-box { display: none; }
 .col-sel { width: 34px; }
 .sel-box.checked { background: var(--accent); border-color: transparent; }
@@ -813,6 +817,7 @@ body.read-only .card-actions { display: none; }
   width: 22px; height: 22px; border-radius: 7px; background: rgba(255,255,255,0.9);
   border: 1.5px solid var(--border-strong); box-shadow: var(--shadow-sm); cursor: pointer;
 }
+.sale-card .sel-box.checked, .sale-row .sel-box.checked { background: var(--accent); border-color: transparent; }
 .sale-card .sel-box:focus-visible, .sale-row .sel-box:focus-visible, .data-table .sel-box:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
