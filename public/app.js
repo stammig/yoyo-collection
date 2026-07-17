@@ -191,7 +191,7 @@ const fmtField = (key, val) => (FIELD_BY_KEY[key]?.fmt ? FIELD_BY_KEY[key].fmt(v
 // Read a field's value whether it's a built-in column or a custom field.
 const valueOf = (y, key) => (FIELD_BY_KEY[key]?.custom ? (y.custom ? y.custom[key] : undefined) : y[key]);
 
-const NUMERIC_KEYS = new Set(['retail', 'paid', 'percent_off', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm']);
+const NUMERIC_KEYS = new Set(['retail', 'paid', 'percent_off', 'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'sale_price']);
 const defaultDir = (key) => (NUMERIC_KEYS.has(key) || FIELD_BY_KEY[key]?.num || key === 'favorite' || key === 'in_hand' ? 'desc' : 'asc');
 
 // Field groups for the read-only detail view.
@@ -717,6 +717,7 @@ function updateToolbar() {
 function refreshCurrentView() {
   if (currentView === 'arrivals') renderArrivals();
   else if (currentView === 'sale') renderSale();
+  else if (currentView === 'sold') renderSold();
   else if (currentView === 'insights') renderInsights();
   else render();
 }
@@ -1064,6 +1065,7 @@ const INLINE_SELECTS = {
   composition: ['BI', 'MN', 'TRI'],
   condition: ['MiB', 'NMBTS', 'Used', 'Beat'],
   bearing_size: ['Size C', 'Size D'],
+  sale_status: ['Not listed', 'For Sale', 'For Trade', 'For Sale or Trade', 'Sold'],
 };
 // Toggles list-view inline cell editing (mutually exclusive with select mode).
 function setListEdit(on) {
@@ -1089,8 +1091,8 @@ async function commitCell(id, key, raw) {
     const updated = await patchYoyo(id, { [key]: raw });
     const idx = yoyos.findIndex((y) => y.id === id);
     if (idx >= 0 && updated) yoyos[idx] = updated;
-    render();
-  } catch (err) { toast(err.message, 'error'); render(); }
+    refreshCurrentView();
+  } catch (err) { toast(err.message, 'error'); refreshCurrentView(); }
 }
 // After a commit + re-render, move the editor to the next/prev editable cell in the row.
 function focusAdjacentCell(id, key, dir) {
@@ -1543,9 +1545,9 @@ function ownerSaleRowsHTML(items) {
         ${selCell}${thumb}
         <div class="sale-row-main">
           <div class="sale-row-name">${esc(y.brand)} ${esc(y.model)}</div>
-          <div class="sale-row-sub">${esc(y.sale_status)}${d != null ? ` · <span class="${staleR ? 'stale' : ''}" ${staleR ? `title="Listed ${d} days — stale"` : ''}>${staleR ? '⚠ ' : ''}${d}d listed</span>` : ''}</div>
+          <div class="sale-row-sub"><span class="sale-editable" data-edit="sale_status">${esc(y.sale_status)}</span>${d != null ? ` · <span class="${staleR ? 'stale' : ''}" ${staleR ? `title="Listed ${d} days — stale"` : ''}>${staleR ? '⚠ ' : ''}${d}d listed</span>` : ''}</div>
         </div>
-        <div class="sale-row-price">${y.sale_price != null ? money(y.sale_price) : '—'}</div>
+        <div class="sale-row-price sale-editable" data-edit="sale_price">${y.sale_price != null ? money(y.sale_price) : '—'}</div>
         <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button>
       </div>`;
   }).join('');
@@ -1567,8 +1569,8 @@ function ownerSaleTableHTML(items) {
     return `<tr data-id="${y.id}" class="${saleSelectedIds.has(y.id) ? 'selected' : ''}">
         ${selCell}<td class="col-photo">${thumb}</td>
         <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
-        <td>${esc(y.sale_status)}</td>
-        <td class="num">${y.sale_price != null ? money(y.sale_price) : '—'}</td>
+        <td class="sale-editable" data-edit="sale_status">${esc(y.sale_status)}</td>
+        <td class="num sale-editable" data-edit="sale_price">${y.sale_price != null ? money(y.sale_price) : '—'}</td>
         <td class="num${staleT ? ' stale' : ''}" ${staleT ? `title="Listed ${d} days — stale"` : ''}>${d != null ? `${staleT ? '⚠ ' : ''}${d}d` : '—'}</td>
         <td><button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button></td>
       </tr>`;
@@ -1750,10 +1752,11 @@ function renderSaleBody() {
       ? `<p class="sale-intro">${items.length} yoyo${items.length === 1 ? '' : 's'} available — tap any for full specs and photos.</p>`
         + `<div class="sale-grid">${items.map(saleCardHTML).join('')}</div>`
       : '<div class="insight-note">Nothing listed for sale or trade right now — check back soon.</div>';
+    const publicList = items.map((y) => y.id);
     body.querySelectorAll('.sale-card[data-id]').forEach((el) => {
       const id = Number(el.dataset.id);
-      el.addEventListener('click', () => openDetail(id));
-      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id); } });
+      el.addEventListener('click', () => openDetail(id, publicList));
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id, publicList); } });
     });
     return;
   }
@@ -1780,12 +1783,18 @@ function renderSaleBody() {
     btn.disabled = true;
     setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
   }));
+  const saleList = items.map((y) => y.id);
   body.querySelectorAll('.sale-card[data-id], .sale-row[data-id], tr[data-id]').forEach((el) => {
     const id = Number(el.dataset.id);
     el.addEventListener('click', (e) => {
+      if (e.target.closest('.cell-editor')) return;
       if (e.target.closest('[data-copy], .sel-box')) return;
       if (saleSelectMode) { toggleSaleSelect(id); return; }
-      openDetail(id);
+      // Price/status quick-edit (List and Table only — Grid cards carry no
+      // .sale-editable elements, so this is a no-op there and falls through below).
+      const editEl = e.target.closest('.sale-editable');
+      if (editEl) { startCellEdit(editEl, id, editEl.dataset.edit); return; }
+      openDetail(id, saleList);
     });
   });
   body.querySelectorAll('.sel-box[data-sale-sel]').forEach((box) => {
@@ -1898,10 +1907,11 @@ function renderSold() {
     ? summary + `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`
     : '<div class="insight-note">Nothing marked as sold yet.</div>';
   wrap.innerHTML = body;
+  const soldList = items.map((y) => y.id);
   wrap.querySelectorAll('.sale-card[data-id]').forEach((el) => {
     const id = Number(el.dataset.id);
-    el.addEventListener('click', () => openDetail(id));
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id); } });
+    el.addEventListener('click', () => openDetail(id, soldList));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id, soldList); } });
   });
 }
 
@@ -2011,12 +2021,22 @@ function renderInsights() {
 let detailList = [];
 // Opens the read-only detail modal for one yoyo, wiring prev/next navigation
 // (within the currently filtered/sorted list), the hero quick-action buttons,
-// and chip-click-to-filter.
-function openDetail(id) {
+// and chip-click-to-filter. `list` is the ordered array of ids prev/next
+// should step through — pass it explicitly from any view whose filter/sort
+// isn't Collection's (Sale, Sold, the public storefront), since without it
+// this used to silently fall back to Collection's own filteredYoyos(), which
+// stepped through the wrong list entirely when opened from those views.
+// Omit `list` when re-opening/stepping within an already-open detail (edit
+// save, prev/next) so the existing context is preserved instead of reset.
+function openDetail(id, list) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
   detailId = id;
-  detailList = filteredYoyos().map((x) => x.id); // for prev/next, in the current order
+  if (list) {
+    detailList = list;
+  } else if (!detailList.includes(id)) {
+    detailList = filteredYoyos().map((x) => x.id); // fresh open, no explicit context — default to Collection's
+  }
   const i = detailList.indexOf(id);
   $('#detailPrev').disabled = i <= 0;
   $('#detailNext').disabled = i < 0 || i >= detailList.length - 1;

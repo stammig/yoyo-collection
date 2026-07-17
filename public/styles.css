@@ -386,6 +386,12 @@ body.select-mode .card-actions { display: none; }
 .data-table.editing tbody td.editable:hover { box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 4px; }
 .cell-editor { width: 100%; min-width: 70px; font-size: 0.84rem; padding: 3px 6px; border: 1px solid var(--accent); border-radius: 5px; background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
 body.list-edit .data-table tbody tr { cursor: default; }
+/* Sale price/status quick-edit (List and Table only) — always click-to-edit,
+   no separate "Edit cells" mode to toggle first (unlike Collection's table,
+   which has many more editable fields and needs that mode to avoid every
+   click accidentally starting an edit instead of opening Detail). */
+.sale-editable { cursor: text; border-radius: 4px; }
+.sale-editable:hover { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .prompt-input { width: 100%; margin-top: 10px; }
 
 /* ============================================================
