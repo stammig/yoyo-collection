@@ -253,6 +253,73 @@ async function loadAll() {
 }
 
 
+// ---- Delight: count-up numbers + grow-in bars ----
+// These fire only when a view is (re)entered — never on every keystroke
+// re-render — and the markup always holds the final value, so the page is
+// correct without JS and under reduced motion.
+function prefersReducedMotion() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function groupThousands(s) {
+  const neg = s.startsWith('-'); if (neg) s = s.slice(1);
+  const [int, frac] = s.split('.');
+  const g = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (neg ? '-' : '') + (frac != null ? g + '.' + frac : g);
+}
+// Count a stat/metric value up from 0 to its rendered number, preserving any
+// prefix ($, +) and suffix (%, d, g) and thousands grouping.
+function animateCounters(root) {
+  if (!root || prefersReducedMotion()) return;
+  root.querySelectorAll('.stat-num, .metric-value').forEach((el) => {
+    if (el.dataset.counting === '1') return;
+    const raw = el.textContent;
+    const m = raw.match(/[\d,]*\.?\d+/);
+    if (!m) return;
+    const numStr = m[0];
+    const target = parseFloat(numStr.replace(/,/g, ''));
+    if (!isFinite(target) || target === 0) return;
+    const decimals = (numStr.split('.')[1] || '').length;
+    const grouped = numStr.includes(',');
+    const prefix = raw.slice(0, m.index);
+    const suffix = raw.slice(m.index + numStr.length);
+    const dur = 620;
+    let startT = 0;
+    el.dataset.counting = '1';
+    const step = (t) => {
+      if (!startT) startT = t;
+      const p = Math.min(1, (t - startT) / dur);
+      const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      let s = decimals ? (target * eased).toFixed(decimals) : String(Math.round(target * eased));
+      if (grouped) s = groupThousands(s);
+      el.textContent = prefix + s + suffix;
+      if (p < 1) requestAnimationFrame(step);
+      else { el.textContent = raw; delete el.dataset.counting; }
+    };
+    el.textContent = prefix + (decimals ? (0).toFixed(decimals) : '0') + suffix;
+    requestAnimationFrame(step);
+  });
+}
+// Grow the Insights bars from 0 to their final width (held in data-w), with a
+// gentle stagger so the chart "draws" itself.
+function animateBars(root) {
+  if (!root || prefersReducedMotion()) return;
+  root.querySelectorAll('.bar-fill[data-w]').forEach((el, i) => {
+    const w = el.dataset.w;
+    el.style.width = '0%';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.style.transitionDelay = (i * 45) + 'ms';
+      el.style.width = w + '%';
+    }));
+  });
+}
+function playViewIntro(v) {
+  if (v === 'collection') animateCounters($('#stats'));
+  else if (v === 'insights') { const el = $('#viewInsights'); animateCounters(el); animateBars(el); }
+  else if (v === 'sold') animateCounters($('#viewSold'));
+  else if (v === 'sale') animateCounters($('#saleStats'));
+}
+let introPending = true; // fire the entrance animation once, after first data load
+
 // Stats reflect whatever is currently filtered/shown.
 function renderStats(list) {
   let inHand = 0, paid = 0, retail = 0;
@@ -710,6 +777,7 @@ function setView(v) {
   else if (v === 'sold') renderSold();
   else if (v === 'insights') renderInsights();
   else render();
+  playViewIntro(v); // count-up / grow-in on each tab entry (no-op if data not loaded yet)
 }
 function updateToolbar() {
   $('#collectionActions').classList.toggle('hidden', !(currentView === 'collection' && canEditState));
@@ -720,6 +788,9 @@ function refreshCurrentView() {
   else if (currentView === 'sold') renderSold();
   else if (currentView === 'insights') renderInsights();
   else render();
+  // Play the entrance animation once — after the first load populates the
+  // view (setView on boot ran before data arrived, so its intro was a no-op).
+  if (introPending) { introPending = false; playViewIntro(currentView); }
 }
 
 // ---- Quick actions (favorite / delete / context menu) ----
@@ -1156,11 +1227,16 @@ function thumbHTML(y, cls) {
 function barChart(rows, color) {
   if (!rows.length) return '';
   const max = Math.max(...rows.map((r) => r.value)) || 1;
-  return `<div class="barchart">` + rows.map((r) =>
-    `<div class="bar-row"><span class="bar-name" title="${esc(r.name)}">${esc(r.name)}</span>` +
-    `<div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, r.value / max * 100).toFixed(1)}%;background:${color}"></div></div>` +
-    `<span class="bar-val">${esc(r.display)}</span></div>`
-  ).join('') + `</div>`;
+  // A leading-edge sheen (fades to a lighter tint of the bar's colour) gives
+  // the fill some depth; data-w carries the final width so animateBars() can
+  // grow it in on view entry while the markup stays correct without JS.
+  const fill = `linear-gradient(90deg, ${color} 0%, color-mix(in srgb, ${color} 68%, white) 100%)`;
+  return `<div class="barchart">` + rows.map((r) => {
+    const w = Math.max(2, r.value / max * 100).toFixed(1);
+    return `<div class="bar-row"><span class="bar-name" title="${esc(r.name)}">${esc(r.name)}</span>` +
+      `<div class="bar-track"><div class="bar-fill" data-w="${w}" style="width:${w}%;background:${fill}"></div></div>` +
+      `<span class="bar-val">${esc(r.display)}</span></div>`;
+  }).join('') + `</div>`;
 }
 
 // ============================================================

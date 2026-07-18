@@ -134,7 +134,10 @@ body:not(.embed) .app-shell { min-height: 100vh; }
 
 .sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 4px 9px 16px; }
 .brand-mark { width: 22px; height: 22px; color: var(--accent); display: inline-flex; }
-.brand-mark svg { width: 22px; height: 22px; }
+/* The mark is a yoyo — so it spins up once on load, and again on hover. */
+.brand-mark svg { width: 22px; height: 22px; animation: yoyoSpin 0.9s cubic-bezier(.2,.7,.3,1); }
+.sidebar-brand:hover .brand-mark svg { animation: yoyoSpin 1s linear infinite; }
+@keyframes yoyoSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 .brand-name { font-weight: 600; font-size: 0.9rem; letter-spacing: -0.015em; }
 
 .sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
@@ -570,7 +573,9 @@ body.read-only .card-actions { display: none; }
 .bar-row { display: grid; grid-template-columns: 116px 1fr auto; align-items: center; gap: 12px; }
 .bar-name { font-size: 0.8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar-track { background: var(--surface-3); border-radius: 999px; height: 10px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 999px; transition: width 0.55s cubic-bezier(.2,.7,.3,1); }
+.bar-fill { position: relative; height: 100%; border-radius: 999px; transition: width 0.7s cubic-bezier(.2,.8,.25,1); }
+/* Glossy top highlight over whatever colour the fill uses (colour-agnostic). */
+.bar-fill::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0) 62%); pointer-events: none; }
 .bar-val { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
 
 .insight-note { display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: 0.83rem; background: var(--surface-2); border: 1px solid var(--separator); border-radius: var(--radius); padding: 11px 13px; margin-bottom: 18px; }
@@ -732,8 +737,12 @@ body.read-only .card-actions { display: none; }
 /* Detail hero summary */
 .detail-hero { display: flex; gap: 16px; align-items: center; padding: 16px; margin-bottom: 18px; background: linear-gradient(135deg, var(--accent-soft), transparent); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .detail-hero-media { width: 120px; height: 120px; border-radius: 14px; overflow: hidden; background: var(--surface-2); display: flex; align-items: center; justify-content: center; flex: none; box-shadow: var(--shadow-sm); cursor: zoom-in; }
-.detail-hero-media img { width: 100%; height: 100%; object-fit: cover; }
+.detail-hero-media img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; will-change: transform; }
 .detail-hero-media .placeholder::before { width: 48px; height: 48px; }
+/* Give it a spin — it's a yoyo. Hovering the hero sets it turning; the round
+   product shots (and the placeholder glyph) rotate about their centre. */
+.detail-hero-media:hover img,
+.detail-hero-media:hover .placeholder::before { animation: yoyoSpin 1.15s linear infinite; }
 .detail-hero-info { min-width: 0; display: flex; flex-direction: column; gap: 11px; }
 .detail-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .status-badge { font-size: 0.7rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; letter-spacing: 0.01em; }
