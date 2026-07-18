@@ -33,6 +33,8 @@
   --sidebar-w:    228px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
           "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
   --yoyo-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Ccircle cx='12' cy='13.5' r='7.5'/%3E%3Ccircle cx='12' cy='13.5' r='2.2'/%3E%3Cpath d='M12 6V2.6'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
@@ -88,6 +90,96 @@
   --shadow-sm:    0 1px 2px rgba(0,0,0,0.4);
   --shadow-card:  0 1px 2px rgba(0,0,0,0.3);
 }
+
+/* ============================================================
+   DESIGN LANGUAGE: "Precision Instrument"  (data-design="precision")
+   A collector-grade, spec-sheet identity: near-monochrome neutrals with a
+   single cobalt signal accent, hairline rules over soft shadows, tight radii,
+   and monospaced readouts for every number. Layered on top of the light/dark
+   theme (data-theme) — this only shifts accent + character tokens; neutrals
+   still come from the theme. The base (no data-design) stays the "Classic"
+   look, so switching languages is a single attribute swap.
+   ============================================================ */
+:root[data-design="precision"] {
+  --accent:       #2d5bff;
+  --accent-hover: #1f47e6;
+  --accent-soft:  rgba(45,91,255,0.10);
+  --radius:       7px;
+  --radius-sm:    4px;
+  --radius-lg:    9px;
+  /* Hairlines carry the structure, so shadows nearly vanish. */
+  --border:       rgba(0,0,0,0.13);
+  --border-strong: rgba(0,0,0,0.42);
+  --separator:    rgba(0,0,0,0.09);
+  --shadow-sm:    0 1px 1px rgba(0,0,0,0.03);
+  --shadow-card:  0 1px 0 rgba(0,0,0,0.02);
+  --shadow:       0 10px 34px rgba(0,0,0,0.16);
+}
+:root[data-design="precision"][data-theme="dark"] {
+  --accent:       #6b8cff;
+  --accent-hover: #86a0ff;
+  --accent-soft:  rgba(107,140,255,0.16);
+  --border:       rgba(255,255,255,0.15);
+  --border-strong: rgba(255,255,255,0.46);
+  --separator:    rgba(255,255,255,0.10);
+  --shadow-sm:    0 1px 1px rgba(0,0,0,0.4);
+  --shadow-card:  none;
+  --shadow:       0 14px 44px rgba(0,0,0,0.6);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-design="precision"]:not([data-theme="light"]) {
+    --accent:       #6b8cff;
+    --accent-hover: #86a0ff;
+    --accent-soft:  rgba(107,140,255,0.16);
+    --border:       rgba(255,255,255,0.15);
+    --border-strong: rgba(255,255,255,0.46);
+    --separator:    rgba(255,255,255,0.10);
+    --shadow-sm:    0 1px 1px rgba(0,0,0,0.4);
+    --shadow-card:  none;
+    --shadow:       0 14px 44px rgba(0,0,0,0.6);
+  }
+}
+
+/* --- Character: numbers as instrument readouts (mono + tabular) --- */
+[data-design="precision"] .stat-num,
+[data-design="precision"] .metric-value,
+[data-design="precision"] .bar-val,
+[data-design="precision"] .sale-price,
+[data-design="precision"] .detail-hero-price,
+[data-design="precision"] .data-table td.num,
+[data-design="precision"] .cell-editor {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+/* --- Character: labels as technical micro-captions --- */
+[data-design="precision"] .stat-label,
+[data-design="precision"] .metric-label,
+[data-design="precision"] .insight-card h3,
+[data-design="precision"] .bar-name {
+  font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+}
+[data-design="precision"] .stat-label,
+[data-design="precision"] .metric-label { font-size: 0.6rem; }
+/* --- Character: flat, hairline-bordered surfaces (no soft float) --- */
+[data-design="precision"] .stat-card,
+[data-design="precision"] .metric-card,
+[data-design="precision"] .insight-card,
+[data-design="precision"] .card,
+[data-design="precision"] .sale-card { box-shadow: none; }
+[data-design="precision"] .stat-card { border-top: 2px solid var(--separator); }
+[data-design="precision"] .stat-card.filtered { border-top-color: var(--accent); box-shadow: none; }
+/* --- Character: rectangular chips/badges (not pills) --- */
+[data-design="precision"] .filter-chip,
+[data-design="precision"] .chip-remove { border-radius: var(--radius-sm); }
+/* --- Character: crisp, ticked measurement bars (no gloss, square-ish) --- */
+[data-design="precision"] .bar-track,
+[data-design="precision"] .bar-fill { border-radius: 2px; }
+[data-design="precision"] .bar-track {
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(25% - 1px), var(--border) calc(25% - 1px) 25%);
+}
+[data-design="precision"] .bar-fill { background: var(--bc, var(--accent)); }
+[data-design="precision"] .bar-fill::after { display: none; }
+/* --- Character: buttons flatten to line-defined controls --- */
+[data-design="precision"] .btn { box-shadow: none; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -570,7 +662,7 @@ body.read-only .card-actions { display: none; }
 .bar-row { display: grid; grid-template-columns: 116px 1fr auto; align-items: center; gap: 12px; }
 .bar-name { font-size: 0.8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar-track { background: var(--surface-3); border-radius: 999px; height: 10px; overflow: hidden; }
-.bar-fill { position: relative; height: 100%; border-radius: 999px; transition: width 0.7s cubic-bezier(.2,.8,.25,1); }
+.bar-fill { position: relative; height: 100%; border-radius: 999px; transition: width 0.7s cubic-bezier(.2,.8,.25,1); background: linear-gradient(90deg, var(--bc, var(--accent)) 0%, color-mix(in srgb, var(--bc, var(--accent)) 68%, white) 100%); }
 /* Glossy top highlight over whatever colour the fill uses (colour-agnostic). */
 .bar-fill::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0) 62%); pointer-events: none; }
 .bar-val { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
@@ -658,6 +750,7 @@ body.read-only .card-actions { display: none; }
 .fs-icon svg { width: 16px; height: 16px; }
 .fs-head h3 { font-size: 0.92rem; font-weight: 600; }
 .fs-head p { margin: 1px 0 0; font-size: 0.74rem; color: var(--muted); }
+.fs-sub { margin: 14px 0 7px; font-size: 0.74rem; font-weight: 500; color: var(--muted); }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field > label { font-size: 0.74rem; color: var(--muted); font-weight: 500; }

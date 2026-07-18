@@ -12,12 +12,15 @@
   <title>Yoyo Collection</title>
   <script>
     // Appearance: ?theme= wins, then saved pref; "auto"/unset follows the OS.
+    // Design language (independent of light/dark theme): saved pref, else the
+    // "precision" language. Set pre-paint to avoid a flash of the base look.
     try {
       var _p = new URLSearchParams(location.search).get('theme');
       var _s = localStorage.getItem('yoyoTheme');
       var _t = (_p === 'light' || _p === 'dark') ? _p : _s;
       if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
-    } catch (e) {}
+      document.documentElement.dataset.design = localStorage.getItem('yoyoDesign') || 'precision';
+    } catch (e) { document.documentElement.dataset.design = 'precision'; }
   </script>
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -454,6 +457,11 @@
             <button type="button" class="seg-btn" data-theme="auto">Auto</button>
             <button type="button" class="seg-btn" data-theme="light">Light</button>
             <button type="button" class="seg-btn" data-theme="dark">Dark</button>
+          </div>
+          <p class="fs-sub">Design language</p>
+          <div class="seg" id="designSeg" role="group" aria-label="Design language">
+            <button type="button" class="seg-btn" data-design="precision">Precision</button>
+            <button type="button" class="seg-btn" data-design="classic">Classic</button>
           </div>
         </section>
 

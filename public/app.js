@@ -1227,14 +1227,14 @@ function thumbHTML(y, cls) {
 function barChart(rows, color) {
   if (!rows.length) return '';
   const max = Math.max(...rows.map((r) => r.value)) || 1;
-  // A leading-edge sheen (fades to a lighter tint of the bar's colour) gives
-  // the fill some depth; data-w carries the final width so animateBars() can
-  // grow it in on view entry while the markup stays correct without JS.
-  const fill = `linear-gradient(90deg, ${color} 0%, color-mix(in srgb, ${color} 68%, white) 100%)`;
+  // The bar colour rides on a --bc custom property so each design language
+  // decides how to render it (Classic paints a leading-edge sheen gradient +
+  // gloss; Precision paints a flat ticked bar). data-w carries the final width
+  // so animateBars() can grow it in on entry while the markup stays correct.
   return `<div class="barchart">` + rows.map((r) => {
     const w = Math.max(2, r.value / max * 100).toFixed(1);
     return `<div class="bar-row"><span class="bar-name" title="${esc(r.name)}">${esc(r.name)}</span>` +
-      `<div class="bar-track"><div class="bar-fill" data-w="${w}" style="width:${w}%;background:${fill}"></div></div>` +
+      `<div class="bar-track"><div class="bar-fill" data-w="${w}" style="width:${w}%;--bc:${color}"></div></div>` +
       `<span class="bar-val">${esc(r.display)}</span></div>`;
   }).join('') + `</div>`;
 }
@@ -3406,9 +3406,27 @@ document.querySelectorAll('#themeSeg .seg-btn').forEach((b) =>
   b.addEventListener('click', () => applyTheme(b.dataset.theme))
 );
 
+// ---- Settings: design language (independent of light/dark theme) ----
+function syncDesignSeg() {
+  const cur = document.documentElement.dataset.design || 'precision';
+  document.querySelectorAll('#designSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.design === cur));
+}
+// Applies and persists a design language. Sets data-design to the chosen
+// value; only [data-design="precision"] has a rule layer, so 'classic' simply
+// falls through to the base look.
+function applyDesign(d) {
+  document.documentElement.dataset.design = d;
+  try { localStorage.setItem('yoyoDesign', d); } catch { /* ignore */ }
+  syncDesignSeg();
+}
+document.querySelectorAll('#designSeg .seg-btn').forEach((b) =>
+  b.addEventListener('click', () => applyDesign(b.dataset.design))
+);
+
 // ---- Settings modal ----
 $('#settingsBtn').addEventListener('click', () => {
   syncThemeSeg();
+  syncDesignSeg();
   renderFieldList();
   resetAddFieldForm();
   $('#settingsModal').classList.remove('hidden');
