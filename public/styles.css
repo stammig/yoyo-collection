@@ -678,10 +678,10 @@ body.read-only .card-actions { display: none; }
 .donut-total { font-size: 27px; font-weight: 700; fill: var(--text); letter-spacing: -0.03em; }
 .donut-cap { font-size: 7.5px; letter-spacing: 0.14em; fill: var(--faint); font-weight: 600; }
 .donut-legend { display: grid; gap: 8px; min-width: 0; flex: 1; }
-.dl-row { display: flex; align-items: center; gap: 9px; font-size: 0.82rem; }
-.dl-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-.dl-name { font-weight: 600; color: var(--text); }
-.dl-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dleg-row { display: flex; align-items: center; gap: 9px; font-size: 0.82rem; }
+.dleg-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.dleg-name { font-weight: 600; color: var(--text); }
+.dleg-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .histo-bars { display: flex; align-items: flex-end; gap: 9px; height: 116px; }
 .histo-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; height: 100%; }
@@ -692,9 +692,9 @@ body.read-only .card-actions { display: none; }
 
 /* Precision language: technical mono labels + crisper bars */
 [data-design="precision"] .donut-total,
-[data-design="precision"] .dl-val,
+[data-design="precision"] .dleg-val,
 [data-design="precision"] .histo-count { font-family: var(--font-mono); }
-[data-design="precision"] .dl-name,
+[data-design="precision"] .dleg-name,
 [data-design="precision"] .histo-x { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
 [data-design="precision"] .histo-bar { border-radius: 2px; }
 
@@ -884,6 +884,31 @@ body.read-only .card-actions { display: none; }
 .dl-row dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .detail-group.full { grid-column: 1 / -1; margin-top: 8px; }
 .detail-desc { color: var(--text); line-height: 1.6; font-size: 0.88rem; white-space: pre-wrap; margin: 0; }
+
+/* ============================================================
+   Graphics set 2: card + detail richness
+   ============================================================ */
+/* A hairline under the photo gives each collection card structure. */
+.card-photo { position: relative; border-bottom: 1px solid var(--separator); }
+/* A larger, more considered hero photo in the detail view. */
+.detail-hero-media { width: 132px; height: 132px; }
+@media (min-width: 560px) { .detail-hero-media { width: 150px; height: 150px; } }
+/* Detail spec rows: give the value a touch more weight than the label so the
+   sheet scans cleanly (label muted, value solid). */
+.dl-row dd { font-weight: 500; color: var(--text); }
+
+/* Precision language treats both surfaces as crisp instruments: flat cards
+   that frame (not lift) on hover, monospaced readouts, and a spec-sheet detail
+   with a flat hero and mono values/labels. Classic is unchanged. */
+[data-design="precision"] .card { box-shadow: none; }
+[data-design="precision"] .card:hover { transform: none; box-shadow: none; border-color: var(--accent); }
+[data-design="precision"] .card-price,
+[data-design="precision"] .card-price strong { font-family: var(--font-mono); }
+[data-design="precision"] .detail-hero { background: var(--surface-2); }
+[data-design="precision"] .detail-group h3 { font-family: var(--font-mono); }
+[data-design="precision"] .dl-row dd,
+[data-design="precision"] .dh-paid,
+[data-design="precision"] .detail-hero-price { font-family: var(--font-mono); }
 
 /* ============================================================
    Settings: photos + custom fields

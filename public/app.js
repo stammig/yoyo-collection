@@ -1258,9 +1258,9 @@ function donutSVG(rows) {
       `transform="rotate(-90 60 60)"/>`;
   }).join('');
   const legend = live.map((r) =>
-    `<div class="dl-row"><span class="dl-dot" style="background:${r.color}"></span>` +
-    `<span class="dl-name">${esc(r.name)}</span>` +
-    `<span class="dl-val">${esc(r.display)} · ${Math.round(r.value / total * 100)}%</span></div>`).join('');
+    `<div class="dleg-row"><span class="dleg-dot" style="background:${r.color}"></span>` +
+    `<span class="dleg-name">${esc(r.name)}</span>` +
+    `<span class="dleg-val">${esc(r.display)} · ${Math.round(r.value / total * 100)}%</span></div>`).join('');
   const aria = live.map((r) => `${r.name} ${r.display}`).join(', ');
   return `<div class="donut"><svg viewBox="0 0 120 120" class="donut-svg" role="img" aria-label="${esc(aria)}">` +
     `<circle cx="60" cy="60" r="42" fill="none" class="donut-bg" stroke-width="15"/>${segs}` +
