@@ -1239,6 +1239,67 @@ function barChart(rows, color) {
   }).join('') + `</div>`;
 }
 
+// A crafted SVG donut for small categorical breakdowns (composition). Segments
+// are stroke-dashed arcs on concentric circles; the hole shows the total. Colours
+// ride CSS custom props so both design languages theme it. rows: [{name, value,
+// display, color}].
+function donutSVG(rows) {
+  const live = rows.filter((r) => r.value > 0);
+  const total = live.reduce((a, r) => a + r.value, 0) || 1;
+  const R = 42, C = 2 * Math.PI * R, GAP = 2.5;
+  let acc = 0;
+  const segs = live.map((r) => {
+    const frac = r.value / total;
+    const len = Math.max(0.5, frac * C - GAP);
+    const off = -acc * C;
+    acc += frac;
+    return `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${r.color}" stroke-width="15" ` +
+      `stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" ` +
+      `transform="rotate(-90 60 60)"/>`;
+  }).join('');
+  const legend = live.map((r) =>
+    `<div class="dl-row"><span class="dl-dot" style="background:${r.color}"></span>` +
+    `<span class="dl-name">${esc(r.name)}</span>` +
+    `<span class="dl-val">${esc(r.display)} · ${Math.round(r.value / total * 100)}%</span></div>`).join('');
+  const aria = live.map((r) => `${r.name} ${r.display}`).join(', ');
+  return `<div class="donut"><svg viewBox="0 0 120 120" class="donut-svg" role="img" aria-label="${esc(aria)}">` +
+    `<circle cx="60" cy="60" r="42" fill="none" class="donut-bg" stroke-width="15"/>${segs}` +
+    `<text x="60" y="57" class="donut-total" text-anchor="middle">${total}</text>` +
+    `<text x="60" y="73" class="donut-cap" text-anchor="middle">TOTAL</text></svg>` +
+    `<div class="donut-legend">${legend}</div></div>`;
+}
+
+// A vertical distribution histogram (HTML/CSS bars, so it stays responsive and
+// picks up the design-language tick styling). buckets: [{label, count}].
+function histogramSVG(buckets, color) {
+  const max = Math.max(...buckets.map((b) => b.count), 1);
+  const cols = buckets.map((b) =>
+    `<div class="histo-col"><div class="histo-track">` +
+    `<div class="histo-bar" data-h="${(b.count / max * 100).toFixed(1)}" style="height:${(b.count / max * 100).toFixed(1)}%;--bc:${color}">` +
+    `<span class="histo-count">${b.count || ''}</span></div></div>` +
+    `<span class="histo-x">${esc(b.label)}</span></div>`).join('');
+  return `<div class="histo"><div class="histo-bars">${cols}</div></div>`;
+}
+
+// Bucket the owned collection into price bands (by retail; the shape of a
+// collection by price is one of the more telling views of a collector).
+function priceBuckets(owned) {
+  const bands = [
+    { label: '<$50', lo: 0, hi: 50 },
+    { label: '$50–99', lo: 50, hi: 100 },
+    { label: '$100–149', lo: 100, hi: 150 },
+    { label: '$150–199', lo: 150, hi: 200 },
+    { label: '$200+', lo: 200, hi: Infinity },
+  ].map((b) => ({ ...b, count: 0 }));
+  for (const y of owned) {
+    const v = y.retail != null ? y.retail : y.paid;
+    if (v == null) continue;
+    const band = bands.find((b) => v >= b.lo && v < b.hi);
+    if (band) band.count++;
+  }
+  return bands.map((b) => ({ label: b.label, count: b.count }));
+}
+
 // ============================================================
 //  Arrivals (calendar of incoming on-order yoyos) — admin only
 // ============================================================
@@ -2085,11 +2146,21 @@ function renderInsights() {
     const spend = spendByBrand(6).map((t) => ({ name: t.name, value: t.amount, display: money0(t.amount) }));
     spendChart = insightCard('Spend by brand', barChart(spend, 'var(--green)'));
   }
-  const comp = compositionTally().map((t) => ({ name: t.name, value: t.count, display: String(t.count) }));
-  const compChart = insightCard('Composition', barChart(comp, 'var(--gold)'));
+  // Composition as a donut (categorical breakdown reads better as a ring than
+  // bars) and the collection's price-band shape as a distribution histogram —
+  // the two most telling "at a glance" views. Colours ride design tokens so
+  // both design languages theme them.
+  const COMP_COLORS = ['var(--accent)', 'var(--gold)', 'var(--green)', 'var(--muted)'];
+  const compData = compositionTally().map((t, i) => ({
+    name: t.name, value: t.count, display: String(t.count), color: COMP_COLORS[i % COMP_COLORS.length],
+  }));
+  const compCard = compData.length ? insightCard('Composition', donutSVG(compData)) : '';
+  const priceCard = admin && owned.some((y) => y.retail != null || y.paid != null)
+    ? insightCard('By price', histogramSVG(priceBuckets(owned), 'var(--accent)')) : '';
+  const chartGrid = (compCard || priceCard) ? `<div class="chart-grid">${compCard}${priceCard}</div>` : '';
 
   const note = !admin ? `<div class="insight-note">${SVG.lock}<span>Log in to see value, savings, and spending insights.</span></div>` : '';
-  wrap.innerHTML = `<div class="metrics-grid">${metrics}</div>${note}${standoutsHTML}${brandChart}${spendChart}${compChart}`;
+  wrap.innerHTML = `<div class="metrics-grid">${metrics}</div>${note}${standoutsHTML}${chartGrid}${brandChart}${spendChart}`;
   wrap.querySelectorAll('[data-arr]').forEach((el) => el.addEventListener('click', () => openDetail(Number(el.dataset.arr))));
 }
 

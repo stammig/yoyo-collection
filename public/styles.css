@@ -667,6 +667,37 @@ body.read-only .card-actions { display: none; }
 .bar-fill::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0) 62%); pointer-events: none; }
 .bar-val { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
 
+/* --- Insights: crafted charts (donut + distribution histogram) --- */
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+.chart-grid .insight-card { margin-bottom: 0; }
+@media (max-width: 680px) { .chart-grid { grid-template-columns: 1fr; } }
+
+.donut { display: flex; align-items: center; gap: 20px; }
+.donut-svg { width: 116px; height: 116px; flex: none; }
+.donut-bg { stroke: var(--surface-3); }
+.donut-total { font-size: 27px; font-weight: 700; fill: var(--text); letter-spacing: -0.03em; }
+.donut-cap { font-size: 7.5px; letter-spacing: 0.14em; fill: var(--faint); font-weight: 600; }
+.donut-legend { display: grid; gap: 8px; min-width: 0; flex: 1; }
+.dl-row { display: flex; align-items: center; gap: 9px; font-size: 0.82rem; }
+.dl-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.dl-name { font-weight: 600; color: var(--text); }
+.dl-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.histo-bars { display: flex; align-items: flex-end; gap: 9px; height: 116px; }
+.histo-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; height: 100%; }
+.histo-track { flex: 1; width: 100%; display: flex; align-items: flex-end; min-height: 0; }
+.histo-bar { width: 100%; min-height: 3px; background: var(--bc, var(--accent)); border-radius: 6px 6px 2px 2px; position: relative; display: flex; justify-content: center; transition: height 0.6s cubic-bezier(.2,.8,.25,1); }
+.histo-count { position: absolute; top: -17px; font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.histo-x { font-size: 0.66rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* Precision language: technical mono labels + crisper bars */
+[data-design="precision"] .donut-total,
+[data-design="precision"] .dl-val,
+[data-design="precision"] .histo-count { font-family: var(--font-mono); }
+[data-design="precision"] .dl-name,
+[data-design="precision"] .histo-x { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; }
+[data-design="precision"] .histo-bar { border-radius: 2px; }
+
 .insight-note { display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: 0.83rem; background: var(--surface-2); border: 1px solid var(--separator); border-radius: var(--radius); padding: 11px 13px; margin-bottom: 18px; }
 .insight-note svg { width: 15px; height: 15px; flex: none; }
 
