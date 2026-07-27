@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-27
+- **Fix modals rendering unusable — footer floated over the content** — every
+  modal (detail, add/edit, settings, login) sized its card to full natural
+  height and let the whole `.modal` overlay scroll, while `.modal-foot` was
+  `position: sticky; bottom: 0`. On any card taller than the viewport the
+  footer pinned to the *viewport* bottom mid-card, overlapping the fields with
+  the rest of the form clipped off-screen below it. The card is now a flex
+  column capped to the viewport (`max-height: 100%`, which resolves against the
+  fixed `.modal`'s height and respects its 44px padding); the head and foot are
+  `flex: 0 0 auto`; and the middle region scrolls internally — `.detail-body`
+  for the detail modal, `.modal-card > .form` for add/edit/login/settings
+  (`flex: 1 1 auto; min-height: 0; overflow-y: auto`). The sticky footer now
+  pins to that contained scroll area. Bottom padding is zeroed on footer-bearing
+  forms (`#modal`/`#loginModal` via `:has(> .modal-foot)`) so the footer seats
+  flush instead of leaking a strip of content below it. Verified on desktop,
+  mobile (375px footer-wrap), light/dark, and on the live site in a short
+  viewport (card caps, footer flush, no overlap).
+
 ## 2026-07-04 (2)
 - **Exempt `/uploads` photo GETs from the rate limiter** — the limiter
   exists to protect the API from abuse, but it was also counting static
