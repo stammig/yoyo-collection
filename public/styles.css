@@ -1302,3 +1302,28 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 .modal-head { border-bottom-color: var(--separator); }
 .modal-head h2 { font-family: var(--font-heading); font-weight: 400; }
 .modal-foot { background: var(--bg); border-top-color: var(--separator); }
+
+/* ── Top bar nav (replaces the left sidebar) ── */
+.app-shell { display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; gap: 26px; padding: 20px 40px 6px; flex-wrap: wrap; }
+.topbar-brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand-mark { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.brand-mark::after { content: ""; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); }
+.brand-name { font-family: var(--font-heading); font-weight: 400; font-size: 19px; letter-spacing: -0.01em; color: var(--text); }
+.topnav { display: flex; align-items: center; gap: 22px; flex-direction: row; }
+.topnav .nav-item { background: none; border: none; box-shadow: none; padding: 6px 4px; margin: 0; border-radius: 0; font-family: var(--font); font-size: 14.5px; font-weight: 400; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; width: auto; }
+.topnav .nav-item .nav-icon { display: none; }
+.topnav .nav-item:hover { background: none; color: var(--accent-deep); }
+.topnav .nav-item.active { background: none; color: var(--accent-deep); font-weight: 600; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.icon-btn { width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: 999px; color: var(--accent-deep); cursor: pointer; }
+.icon-btn svg { width: 18px; height: 18px; }
+.icon-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.smart-views { display: none; }
+body.share-mode .topbar { display: none; }
+
+/* content column + view title now flow beneath the top bar */
+.content { background: var(--bg); }
+.toolbar { position: static; background: transparent; border: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 10px 40px 0; min-height: 0; }
+.toolbar-title { font-family: var(--font-heading); font-weight: 400; font-size: 38px; line-height: 1.02; letter-spacing: -0.015em; color: var(--text); }
+.views { padding: 8px 40px 48px; }
