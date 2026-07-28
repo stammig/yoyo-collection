@@ -1686,6 +1686,10 @@ function saleCardHTML(y) {
         <div class="sale-model">${esc(y.model)}</div>
         ${sub ? `<div class="sale-sub">${sub}</div>` : ''}
         ${priceLine}
+        <div class="sale-actions">
+          <button type="button" class="btn btn-primary btn-sm">Details</button>
+          <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy listing</button>
+        </div>
       </div>
     </article>`;
 }
@@ -1836,7 +1840,10 @@ function ownerSaleCardHTML(y) {
         <div class="sale-brand">${esc(y.brand)}</div>
         <div class="sale-model">${esc(y.model)}</div>
         <div class="sale-price">${price}</div>
-        <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy listing text</button>
+        <div class="sale-actions">
+          <button type="button" class="btn btn-primary btn-sm">Details</button>
+          <button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy listing</button>
+        </div>
       </div>
     </article>`;
 }

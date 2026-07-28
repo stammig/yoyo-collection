@@ -1109,8 +1109,6 @@ body.share-mode .detail-hero-actions { display: none; }
   .sidebar-brand { display: none; }
   .sidebar-nav { flex-direction: row; }
   .sidebar-foot { margin: 0 0 0 auto; flex-direction: row; padding-top: 0; }
-  .nav-item span { display: none; }
-  .nav-item { padding: 7px 10px; }
   /* Toolbar scrolls with content so it can't stack on top of the sticky nav. */
   .toolbar { position: static; padding: 0 16px; }
   .views { padding: 16px 16px 36px; }
@@ -1237,7 +1235,8 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
   background: var(--surface-2); color: #3d362e; border: none;
 }
 .tag.clickable { cursor: pointer; }
-.tag-sale, .sale-badge.sale, .sale-badge.trade, .gal-badge.sale { background: var(--accent-soft); color: var(--accent-deep); }
+.tag-sale, .sale-badge.sale, .sale-badge.both, .gal-badge.sale { background: var(--accent-soft); color: var(--accent-deep); }
+.sale-badge.trade { background: var(--gold-soft); color: var(--gold-deep); }
 .tag-sold, .tag-retired, .sale-badge.sold, .gal-badge.sold { background: var(--surface-2); color: var(--muted); }
 /* status: In hand → mustard, On order/ETA → teal outline */
 .status-badge.in { background: var(--gold-soft); color: var(--gold-deep); }
@@ -1311,7 +1310,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 .brand-mark::after { content: ""; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); }
 .brand-name { font-family: var(--font-heading); font-weight: 400; font-size: 19px; letter-spacing: -0.01em; color: var(--text); }
 .topnav { display: flex; align-items: center; gap: 22px; flex-direction: row; }
-.topnav .nav-item { background: none; border: none; box-shadow: none; padding: 6px 4px; margin: 0; border-radius: 0; font-family: var(--font); font-size: 14.5px; font-weight: 400; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; width: auto; }
+.topnav .nav-item { flex: none; white-space: nowrap; background: none; border: none; box-shadow: none; padding: 6px 4px; margin: 0; border-radius: 0; font-family: var(--font); font-size: 14.5px; font-weight: 400; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; width: auto; }
 .topnav .nav-item .nav-icon { display: none; }
 .topnav .nav-item:hover { background: none; color: var(--accent-deep); }
 .topnav .nav-item.active { background: none; color: var(--accent-deep); font-weight: 600; }
@@ -1468,3 +1467,45 @@ body.share-mode .topbar { display: none; }
 .arrivals-block h3 { font-family: var(--font); font-weight: 600; font-size: 11.5px; letter-spacing: 0.14em; color: var(--accent-deep); text-transform: none; margin-bottom: 12px; }
 .arrivals-block { display: flex; flex-direction: column; gap: 14px; }
 @media (max-width: 1000px) { .arrivals-layout { grid-template-columns: 1fr; gap: 24px; } }
+
+/* ── Loose ends ── */
+/* Retire the now-inert Appearance controls (no dark mode / single language). */
+#settingsModal .form-section:has(#themeSeg) { display: none; }
+/* Chunkier icon strokes for the rounded chrome feel (Lucide-ish). */
+.icon-btn svg, .hero-act svg, .standout-icon svg, .card-fav-btn svg, .pop-action svg,
+.dz-icon svg, .fs-icon svg, .detail-hero-actions svg, .arrival-thumb svg, .status-banner svg { stroke-width: 2.4px; }
+
+/* Re-homed saved-views strip (was the sidebar list) */
+.smart-views { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; padding: 0; }
+.smart-views.hidden { display: none; }
+.smart-views .sv-item { display: inline-flex; align-items: center; }
+.smart-views .sv-apply { background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 10px; font-family: var(--font); font-size: 13px; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.smart-views .sv-apply:hover { background: var(--hover); }
+.smart-views .sv-apply .nav-icon { width: 13px; height: 13px; }
+.smart-views .sv-del { border: none; background: none; color: var(--faint); cursor: pointer; font-size: 12px; padding: 0 2px; margin-left: -4px; }
+.smart-views .sv-del:hover { color: var(--danger); }
+
+/* ── Mobile / responsive pass on the new chrome ── */
+@media (max-width: 760px) {
+  .topbar { gap: 12px; padding: 14px 18px 6px; }
+  .topnav { gap: 14px; order: 3; width: 100%; overflow-x: auto; padding-bottom: 2px; }
+  .topbar-right { gap: 6px; }
+  .toolbar { padding: 8px 18px 0; }
+  .toolbar-title { font-size: 30px; }
+  .views { padding: 6px 18px 40px; }
+  .ledger-band { padding: 18px 18px 20px; }
+  .band-figs { gap: 22px; }
+  .band-num { font-size: 26px; }
+  .detail-sheet .modal-card { border-radius: 0; }
+  .hero-name { font-size: 32px; }
+}
+@media (max-width: 460px) {
+  .shelf-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-dials { gap: 10px; }
+  .dial { width: 78px; height: 78px; }
+}
+
+/* For Sale card actions */
+.sale-actions { display: flex; gap: 8px; margin-top: 12px; }
+.sale-actions .btn { flex: 1 1 auto; white-space: nowrap; }
+.btn-sm { padding: 6px 12px; font-size: 13.5px; }
