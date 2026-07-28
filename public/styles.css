@@ -1460,3 +1460,11 @@ body.share-mode .topbar { display: none; }
 .idial.gold { background: var(--gold-soft); }
 .idial.gold .idial-val { color: var(--gold-deep); }
 @media (max-width: 620px) { .idial { width: 108px; height: 108px; } .idial-val { font-size: 21px; } }
+
+/* ── Arrivals: calendar + list two-column ── */
+.arrivals-intro { color: var(--muted); font-size: 15px; margin: 0 0 18px; max-width: 60ch; }
+.arrivals-layout { display: grid; grid-template-columns: 380px 1fr; gap: 36px; align-items: start; }
+.arrivals-list { display: flex; flex-direction: column; gap: 14px; }
+.arrivals-block h3 { font-family: var(--font); font-weight: 600; font-size: 11.5px; letter-spacing: 0.14em; color: var(--accent-deep); text-transform: none; margin-bottom: 12px; }
+.arrivals-block { display: flex; flex-direction: column; gap: 14px; }
+@media (max-width: 1000px) { .arrivals-layout { grid-template-columns: 1fr; gap: 24px; } }

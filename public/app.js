@@ -1603,12 +1603,19 @@ function renderArrivals() {
   const nd = yoyos.filter((y) => !y.in_hand && !parseETA(y.eta));
   const ndHTML = nd.length ? `<div class="arrivals-block"><h3>On order · no date</h3>` + nd.map((y) => arrivalRow(y, 'Awaiting ship date')).join('') + `</div>` : '';
 
-  wrap.innerHTML =
-    `<div class="cal-card">
-      <div class="cal-head"><button class="cal-nav" data-cal="-1">‹</button><span class="cal-title">${esc(monthTitle)}</span><button class="cal-nav" data-cal="1">›</button></div>
-      <div class="cal-weekdays">${weekdays}</div>
-      <div class="cal-grid">${cells}</div>
-    </div>${listHTML}${ndHTML}`;
+  const onWay = yoyos.filter((y) => !y.in_hand).length;
+  const intro = onWay
+    ? `<p class="arrivals-intro">${onWay} on the way. Edit tracking or an ETA inline; mark one arrived and it moves onto the shelf.</p>`
+    : '';
+  wrap.innerHTML = intro +
+    `<div class="arrivals-layout">
+      <div class="cal-card">
+        <div class="cal-head"><button class="cal-nav" data-cal="-1">‹</button><span class="cal-title">${esc(monthTitle)}</span><button class="cal-nav" data-cal="1">›</button></div>
+        <div class="cal-weekdays">${weekdays}</div>
+        <div class="cal-grid">${cells}</div>
+      </div>
+      <div class="arrivals-list">${listHTML}${ndHTML}</div>
+    </div>`;
 
   wrap.querySelectorAll('[data-cal]').forEach((b) => b.addEventListener('click', () => {
     calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + Number(b.dataset.cal), 1);
