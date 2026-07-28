@@ -1317,6 +1317,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: 999px; color: var(--accent-deep); cursor: pointer; }
 .icon-btn svg { width: 18px; height: 18px; }
+.btn-ico { width: 15px; height: 15px; flex: none; }
 .icon-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .smart-views { display: none; }
 body.share-mode .topbar { display: none; }
