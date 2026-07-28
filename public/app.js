@@ -557,18 +557,35 @@ function makerTally(list) {
   return [...m.entries()].map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
+let makerChipsExpanded = false;
+const MAKER_CHIP_LIMIT = 8; // collapsed: show the busiest makers, hide the long tail behind a caret
 function renderMakerChips(all) {
   const wrap = $('#makerChips'); if (!wrap) return;
   const makers = makerTally(ownedYoyos());
   const active = filters.brands;
   const chip = (name, label, on) => `<button class="maker-chip${on ? ' active' : ''}" data-maker="${esc(name)}">${esc(label)}</button>`;
-  wrap.innerHTML = chip('', 'All makers', !active.length) +
-    makers.map((mk) => chip(mk.name, `${mk.name} ${mk.count}`, active.includes(mk.name))).join('');
+
+  // Collapsed: the top MAKER_CHIP_LIMIT by count, always keeping any active maker visible.
+  let visible = makers, hidden = 0;
+  if (!makerChipsExpanded && makers.length > MAKER_CHIP_LIMIT) {
+    visible = makers.slice(0, MAKER_CHIP_LIMIT);
+    for (const mk of makers.slice(MAKER_CHIP_LIMIT)) if (active.includes(mk.name)) visible.push(mk);
+    hidden = makers.length - MAKER_CHIP_LIMIT;
+  }
+  let html = chip('', 'All makers', !active.length) +
+    visible.map((mk) => chip(mk.name, `${mk.name} ${mk.count}`, active.includes(mk.name))).join('');
+  if (makers.length > MAKER_CHIP_LIMIT) {
+    html += makerChipsExpanded
+      ? `<button class="maker-chip maker-more" data-more="1">Show less ▲</button>`
+      : `<button class="maker-chip maker-more" data-more="1">+${hidden} more ▾</button>`;
+  }
+  wrap.innerHTML = html;
+
   wrap.querySelectorAll('[data-maker]').forEach((el) => el.addEventListener('click', () => {
-    const mk = el.dataset.maker;
-    filters.brands = mk ? [mk] : [];
+    filters.brands = el.dataset.maker ? [el.dataset.maker] : [];
     view.page = 1; render();
   }));
+  wrap.querySelector('[data-more]')?.addEventListener('click', () => { makerChipsExpanded = !makerChipsExpanded; renderMakerChips(all); });
   const n = all.length;
   const tc = $('#throwsCount'); if (tc) tc.textContent = `${n} ${n === 1 ? 'throw' : 'throws'} shown`;
 }
@@ -644,8 +661,10 @@ function shelfGroupHTML(maker, items, featured) {
       ? `<img src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`
       : '<span class="placeholder"></span>';
     const sub = shelfSub(y);
+    const editBtn = canEditState
+      ? `<span class="shelf-edit" data-editid="${y.id}" role="button" tabindex="-1" title="Edit ${esc(y.brand)} ${esc(y.model)}" aria-label="Edit">${SVG.edit}</span>` : '';
     return `<button class="shelf-tile" data-open="${y.id}">
-      <span class="shelf-thumb${feat}">${media}</span>
+      <span class="shelf-thumb${feat}">${media}${editBtn}</span>
       <span class="shelf-name">${esc(y.model)}</span>
       <span class="shelf-subline ${sub.cls}">${esc(sub.text)}</span>
     </button>`;
