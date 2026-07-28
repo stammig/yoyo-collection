@@ -1321,6 +1321,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 .icon-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .smart-views { display: none; }
 body.share-mode .topbar { display: none; }
+body.read-only #addBtn, body.read-only #settingsBtn { display: none; } /* owner-only actions */
 
 /* content column + view title now flow beneath the top bar */
 .content { background: var(--bg); }
