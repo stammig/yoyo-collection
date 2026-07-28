@@ -138,6 +138,18 @@
           </section>
           </div><!-- /collection-header -->
 
+          <section class="ledger-band hidden" id="ledgerBand"></section>
+          <section class="ledger-filters hidden" id="ledgerFilters">
+            <div class="seg status-seg" id="statusSeg">
+              <button class="seg-btn active" data-status="">All</button>
+              <button class="seg-btn" data-status="in">In hand</button>
+              <button class="seg-btn" data-status="order">On order</button>
+              <button class="seg-btn" data-status="listed">Listed</button>
+              <button class="seg-btn" data-status="retired">Retired</button>
+            </div>
+            <span class="ledger-hint">Click a row to open it · ✎ to edit</span>
+          </section>
+
           <section id="grid" class="grid"></section>
           <div id="empty" class="empty hidden">
             <strong>No yoyos to show</strong>

@@ -418,6 +418,7 @@ function filteredYoyos() {
   if (filters.status === 'in') list = list.filter((y) => y.in_hand);
   else if (filters.status === 'order') list = list.filter((y) => !y.in_hand);
   if (filters.retiredOnly) list = list.filter((y) => y.retired);
+  if (filters.listed) list = list.filter((y) => isForSale(y.sale_status));
   if (filters.favOnly) list = list.filter((y) => y.favorite);
   const inRange = (val, min, max) =>
     (min == null || (val != null && val >= min)) && (max == null || (val != null && val <= max));
@@ -492,7 +493,7 @@ function render() {
   const pageItems = view.pageSize === 'all' ? all : all.slice(start, start + size);
 
   renderMakerChips(all);
-  applyModeChrome();
+  applyModeChrome(all);
   if (view.mode === 'row') {
     renderRows(pageItems);
     renderPager(all.length, start, pageItems.length, totalPages);
@@ -505,11 +506,46 @@ function render() {
 
 // Shelf/Ledger share one Collection header; toggle the chrome that only makes
 // sense in one mode (stat cards, tile-size, column picker are Ledger-only).
-function applyModeChrome() {
-  const shelf = view.mode !== 'row';
-  $('#stats').classList.toggle('hidden', shelf);
-  document.querySelector('.fields-menu')?.classList.toggle('hidden', shelf);
-  $('#pageSize')?.closest('.inline-label')?.classList.toggle('hidden', shelf);
+function applyModeChrome(all) {
+  const ledger = view.mode === 'row';
+  $('#stats').classList.add('hidden');                 // replaced by the teal band in Ledger
+  $('#ledgerBand').classList.toggle('hidden', !ledger || !canEditState);
+  $('#ledgerFilters').classList.toggle('hidden', !ledger);
+  document.querySelector('.fields-menu')?.classList.toggle('hidden', !ledger);
+  $('#pageSize')?.closest('.inline-label')?.classList.toggle('hidden', !ledger);
+  if (ledger) { renderLedgerBand(all); syncStatusSeg(); }
+}
+
+// The Ledger's teal stat band: lifetime paid / savings / retail value / recovered.
+function renderLedgerBand(list) {
+  const band = $('#ledgerBand'); if (!band || !canEditState) return;
+  let paid = 0, retail = 0;
+  for (const y of list) { paid += y.paid || 0; retail += y.retail || 0; }
+  const recovered = yoyos.filter(isSold).reduce((a, y) => a + recoveredAmount(y), 0);
+  const fig = (val, label, tone = '') => `<div class="band-fig ${tone}"><span class="band-num">${esc(val)}</span><span class="band-label">${esc(label)}</span></div>`;
+  band.innerHTML = `<div class="band-figs">${
+    fig(money0(paid), 'Total paid')
+    + fig(money0(retail - paid), 'Saved vs retail')
+    + fig(money0(retail), 'Retail value')
+    + fig(money0(recovered), 'Recovered on sales', 'gold')
+  }</div><div class="band-actions">
+      <button type="button" class="btn band-bulk" id="bandBulk">Bulk edit</button>
+      <a class="btn band-export" href="/api/export.csv">Export CSV</a>
+    </div>`;
+  $('#bandBulk')?.addEventListener('click', () => $('#selectBtn')?.click());
+}
+
+// Status seg (All · In hand · On order · Listed · Retired) → the filters object.
+function syncStatusSeg() {
+  const cur = filters.retiredOnly ? 'retired' : filters.listed ? 'listed' : (filters.status || '');
+  $('#statusSeg')?.querySelectorAll('[data-status]').forEach((b) => b.classList.toggle('active', b.dataset.status === cur));
+}
+function applyStatusFilter(s) {
+  filters.status = (s === 'in' || s === 'order') ? s : '';
+  filters.retiredOnly = s === 'retired';
+  filters.listed = s === 'listed';
+  view.page = 1;
+  render();
 }
 
 // Maker filter chips (All makers + each maker with its count, most first). The
@@ -3503,6 +3539,9 @@ document.addEventListener('click', (e) => {
 // ---- Events: view ----
 $('#viewTile').addEventListener('click', () => { view.mode = 'tile'; saveView(); render(); });
 $('#viewRow').addEventListener('click', () => { view.mode = 'row'; saveView(); render(); });
+$('#statusSeg')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-status]'); if (b) applyStatusFilter(b.dataset.status);
+});
 $('#selectBtn').addEventListener('click', () => setSelectMode(!selectMode));
 $('#listEditBtn').addEventListener('click', () => setListEdit(!listEditMode));
 $('#tileSize').addEventListener('change', (e) => { view.size = e.target.value; saveView(); render(); });

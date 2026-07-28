@@ -1386,3 +1386,19 @@ body.share-mode .topbar { display: none; }
   .shelf-grid { grid-template-columns: repeat(3, 1fr); }
   .hero-name { font-size: 34px; }
 }
+
+/* ── Ledger stat band ── */
+.ledger-band { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin: 6px 0 0; padding: 22px 28px 24px; border-radius: var(--radius-lg); background: var(--accent); color: var(--on-accent); }
+.band-figs { display: flex; gap: 40px; align-items: flex-end; flex-wrap: wrap; }
+.band-num { font-family: var(--font-heading); font-weight: 400; font-size: 32px; line-height: 1; display: block; }
+.band-label { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.85; margin-top: 6px; display: block; }
+.band-fig.gold .band-num { color: var(--gold-mid); }
+.band-actions { display: flex; gap: 10px; }
+#ledgerBand .band-bulk { background: var(--bg); color: var(--accent-deep); border: none; }
+#ledgerBand .band-bulk:hover { background: var(--surface-2); }
+#ledgerBand .band-export { background: transparent; border: 1px solid color-mix(in srgb, var(--bg) 45%, transparent); color: var(--on-accent); text-decoration: none; }
+#ledgerBand .band-export:hover { background: color-mix(in srgb, var(--bg) 14%, transparent); }
+
+/* ── Ledger status filter row ── */
+.ledger-filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 16px 0 8px; }
+.ledger-hint { margin-left: auto; color: var(--muted); font-size: 13px; }
