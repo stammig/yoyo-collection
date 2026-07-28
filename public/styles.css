@@ -1414,3 +1414,37 @@ body.share-mode .topbar { display: none; }
 .sheet-title { font-family: var(--font-heading); font-weight: 400; font-size: 22px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; margin: 0; }
 .detail-sheet .detail-body { padding: 6px 24px 22px; }
 .detail-sheet .modal-foot { padding: 14px 24px; }
+
+/* ── Add / Edit form ── */
+#modal .form, #settingsModal .form { background: var(--bg); }
+#modal .form-section, #settingsModal .form-section { background: transparent; border: none; box-shadow: none; border-radius: 0; padding: 8px 0 14px; margin-bottom: 0; }
+.fs-icon { display: none; }
+.fs-head { gap: 0; margin-bottom: 12px; }
+#modal .fs-head, #settingsModal .fs-head { padding-bottom: 0; border-bottom: none; }
+.fs-head h3 { font-family: var(--font); font-weight: 600; font-size: 11.5px; letter-spacing: 0.14em; color: var(--accent-deep); text-transform: none; }
+.fs-head p { display: none; }
+
+/* live preview strip */
+.edit-hero { background: var(--accent-soft); border: none; border-radius: var(--radius-lg); padding: 16px; gap: 14px; }
+.hero-thumb { width: 56px; height: 56px; border-radius: 50%; }
+.hero-title { font-family: var(--font-heading); font-weight: 400; font-size: 21px; }
+.hero-brand, .hero-meta { color: var(--accent-deep); }
+
+/* composition / condition pickers → segmented control */
+.tile-group { display: flex; flex-wrap: nowrap; gap: 0; width: 100%; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.tile { flex: 1 1 0; min-width: 0; flex-direction: row; justify-content: center; gap: 4px; padding: 9px 10px; border: none; border-left: 1px solid var(--border); border-radius: 0; background: transparent; }
+.tile:first-child { border-left: none; }
+.tile span { font-family: var(--font-heading); font-weight: 400; font-size: 14px; }
+.tile small { display: none; }
+.tile:hover { border-color: transparent; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.tile.active { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.tile.active span { color: var(--on-accent); }
+
+/* toggles: teal when on */
+.switch input:checked + .track { background: var(--accent); }
+.switch.fav input:checked + .track { background: var(--gold); }
+
+/* photo dropzone */
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
+.dropzone:hover { border-color: var(--accent); }
+.dz-icon { border-radius: 50%; background: var(--surface-3); }
