@@ -1202,15 +1202,15 @@ input:focus-visible, textarea:focus-visible, .select:focus-visible { outline: no
    specificity; the [data-design="precision"] blocks are inert because the
    app now runs design="organic". Light only (no dark mode this pass).
    ════════════════════════════════════════════════════════════════════════ */
-body { font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+body { font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; letter-spacing: -0.015em; line-height: 1.12; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
 /* ── Buttons ── */
 .btn {
-  font-family: var(--font-heading); font-weight: 400; font-size: 14px; line-height: 1.2;
-  border-radius: 999px; padding: 8.8px 15.8px; border: 1px solid transparent;
+  font-family: var(--font-heading); font-weight: 400; font-size: 15px; line-height: 1.2;
+  border-radius: 999px; padding: 9px 16px; border: 1px solid transparent;
   background: transparent; color: var(--text); box-shadow: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -1232,8 +1232,8 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 
 /* ── Tags / chips / badges ── (pills; casing preserved — never uppercase) */
 .tag, .status-badge, .sale-badge, .filter-chip, .chip {
-  border-radius: 999px; font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
-  padding: 3px 10px; font-family: var(--font); text-transform: none;
+  border-radius: 999px; font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  padding: 3.5px 11px; font-family: var(--font); text-transform: none;
   background: var(--surface-2); color: #3d362e; border: none;
 }
 .tag.clickable { cursor: pointer; }
@@ -1247,7 +1247,7 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 /* ── Segmented control ── */
 .seg { border: 1px solid var(--border); border-radius: 999px; background: transparent; overflow: hidden; padding: 0; gap: 0; }
 .seg-btn {
-  font-family: var(--font-heading); font-weight: 400; font-size: 13px; padding: 7px 14px;
+  font-family: var(--font-heading); font-weight: 400; font-size: 14px; padding: 7.5px 15px;
   background: transparent; color: var(--text); border: none; border-radius: 0;
   border-left: 1px solid var(--border); cursor: pointer;
 }
@@ -1259,12 +1259,12 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 .search, .select, .input, .field input, .field select, input[type="text"], input[type="search"], input[type="number"], input[type="date"] {
   border-radius: 999px; min-height: 36px; padding: 6px 14px;
   background: var(--surface); border: 1px solid var(--border);
-  font-family: var(--font); font-size: 14px; color: var(--text); caret-color: var(--accent);
+  font-family: var(--font); font-size: 15px; color: var(--text); caret-color: var(--accent);
 }
-.field textarea, textarea { border-radius: 16px; min-height: 90px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); font-family: var(--font); font-size: 14px; color: var(--text); caret-color: var(--accent); }
+.field textarea, textarea { border-radius: 16px; min-height: 90px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); font-family: var(--font); font-size: 15px; color: var(--text); caret-color: var(--accent); }
 .search:focus, .select:focus, .field input:focus, .field select:focus, .field textarea:focus, textarea:focus, .input:focus { border-color: var(--accent); outline: none; box-shadow: none; background: var(--surface); }
 .select-sm { min-height: 32px; padding: 4px 12px; }
-.field > label { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 5px; text-transform: none; letter-spacing: 0; }
+.field > label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 5px; text-transform: none; letter-spacing: 0; }
 
 /* ── Cards / panels ── (28px, no border, soft shadow; no hover lift) */
 .card, .insight-card, .metric-card, .sale-card, .stat-card, .arrival-row, .cal-card {
@@ -1292,8 +1292,8 @@ h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); font-weight: 400; let
 }
 
 /* ── Tables ── */
-.data-table th { font-family: var(--font); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); background: transparent; }
-.data-table td { padding: 8.8px; font-size: 13.5px; border-bottom: 1px solid rgba(42,35,32,0.08); }
+.data-table th { font-family: var(--font); font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); background: transparent; }
+.data-table td { padding: 9.5px 8.8px; font-size: 14.5px; border-bottom: 1px solid rgba(42,35,32,0.08); }
 .data-table tbody tr:hover { background: rgba(42,35,32,0.04); }
 
 /* ── Modals ── */
