@@ -646,6 +646,43 @@ body.read-only .card-actions { display: none; }
 .insight-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow-card); margin-bottom: 18px; }
 .insight-card h3 { font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 14px; }
 
+/* ---- Yoyo of the day (Insights feature banner) ---- */
+.yotd { display: flex; gap: 18px; align-items: center; background: linear-gradient(135deg, var(--accent-soft), transparent); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 22px; cursor: pointer; box-shadow: var(--shadow-card); transition: transform 0.08s ease, box-shadow 0.15s ease; }
+.yotd:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.yotd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.yotd-media { width: 128px; height: 128px; flex: none; border-radius: var(--radius); overflow: hidden; background: var(--surface-2); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); }
+.yotd-media img { width: 100%; height: 100%; object-fit: cover; }
+.yotd-body { min-width: 0; }
+.yotd-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
+.yotd-eyebrow svg { width: 14px; height: 14px; }
+.yotd-name { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin: 4px 0 0; }
+.yotd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.yotd-specs { color: var(--muted); font-size: 0.85rem; margin-top: 8px; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .yotd-media { width: 88px; height: 88px; } .yotd-name { font-size: 1.15rem; } }
+
+/* ---- Gallery (image wall) ---- */
+.gallery-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.gallery-bar .btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.gallery-bar .btn svg { width: 15px; height: 15px; vertical-align: -2px; }
+.gallery-count { color: var(--muted); font-size: 0.8rem; }
+.gallery-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.gallery-grid[data-size="sm"] { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.gallery-grid[data-size="lg"] { grid-template-columns: repeat(auto-fill, minmax(264px, 1fr)); gap: 10px; }
+.gallery-tile { position: relative; display: block; padding: 0; border: none; border-radius: var(--radius); overflow: hidden; aspect-ratio: 1 / 1; background: var(--surface-2); cursor: pointer; box-shadow: var(--shadow-sm); }
+.gallery-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.35s ease; }
+.gallery-tile:hover img { transform: scale(1.05); }
+.gallery-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gal-fav { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--gold); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55)); }
+.gal-fav svg { width: 16px; height: 16px; }
+.gal-badge { position: absolute; top: 7px; left: 7px; font-size: 0.62rem; font-weight: 650; padding: 2px 7px; border-radius: 999px; color: #fff; letter-spacing: 0.02em; }
+.gal-badge.sale { background: var(--green); }
+.gal-badge.sold { background: var(--muted); }
+/* Caption: hidden by default, fades in on hover, or pinned on via .show-info */
+.gal-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 10px 9px; display: flex; flex-direction: column; gap: 1px; background: linear-gradient(transparent, rgba(0,0,0,0.74)); color: #fff; opacity: 0; transition: opacity 0.18s ease; text-align: left; pointer-events: none; }
+.gallery-tile:hover .gal-cap, .gallery-grid.show-info .gal-cap { opacity: 1; }
+.gal-brand { font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; }
+.gal-model { font-size: 0.86rem; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .standouts { display: grid; gap: 2px; }
 .standout-row { display: flex; align-items: center; gap: 13px; padding: 8px 8px; border-radius: var(--radius-sm); cursor: pointer; margin: 0 -8px; transition: background 0.08s ease; }
 .standout-row:hover { background: var(--hover); }

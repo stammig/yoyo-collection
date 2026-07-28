@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-07-27 (2)
+- **New Gallery view — a wall of your yoyo photos** — a dedicated sidebar
+  section (`data-view="gallery"`) that lays every photographed yoyo out as a
+  dense grid of square lead images (`renderGallery`). Captions (brand/model)
+  are hidden by default, fade in on hover, and can be pinned on for every tile
+  with the toolbar's **Info** toggle; a Small/Medium/Large control resizes the
+  wall. Favourites show a gold star and For Sale/Sold tiles a corner badge.
+  Photo-less yoyos are omitted (the toolbar notes how many: "N photos · M
+  without"). Clicking a tile opens the detail modal, stepping through the
+  gallery's own order.
+- **Insights: "Yoyo of the day"** — a featured banner at the top of Insights
+  picks one yoyo deterministically from the calendar day (stable all day,
+  rotates daily; prefers photographed yoyos), showing its photo, name, a couple
+  of chips, and key specs. Click to open its detail.
+- **Insights: average specs** — a new "Average specs" card showing the mean
+  weight / diameter / width / gap across the owned collection, as metric tiles
+  (only specs that have data appear).
+
 ## 2026-07-27
 - **Fix modals rendering unusable — footer floated over the content** — every
   modal (detail, add/edit, settings, login) sized its card to full natural

@@ -766,13 +766,15 @@ function setView(v) {
   document.querySelectorAll('#sidebarNav .nav-item').forEach((b) =>
     b.classList.toggle('active', b.dataset.view === v));
   $('#viewCollection').classList.toggle('hidden', v !== 'collection');
+  $('#viewGallery').classList.toggle('hidden', v !== 'gallery');
   $('#viewArrivals').classList.toggle('hidden', v !== 'arrivals');
   $('#viewSale').classList.toggle('hidden', v !== 'sale');
   $('#viewSold').classList.toggle('hidden', v !== 'sold');
   $('#viewInsights').classList.toggle('hidden', v !== 'insights');
-  $('#viewTitle').textContent = v === 'arrivals' ? 'Arrivals' : v === 'sale' ? 'For Sale' : v === 'sold' ? 'Sold' : v === 'insights' ? 'Insights' : 'Collection';
+  $('#viewTitle').textContent = v === 'gallery' ? 'Gallery' : v === 'arrivals' ? 'Arrivals' : v === 'sale' ? 'For Sale' : v === 'sold' ? 'Sold' : v === 'insights' ? 'Insights' : 'Collection';
   updateToolbar();
-  if (v === 'arrivals') renderArrivals();
+  if (v === 'gallery') renderGallery();
+  else if (v === 'arrivals') renderArrivals();
   else if (v === 'sale') renderSale();
   else if (v === 'sold') renderSold();
   else if (v === 'insights') renderInsights();
@@ -783,7 +785,8 @@ function updateToolbar() {
   $('#collectionActions').classList.toggle('hidden', !(currentView === 'collection' && canEditState));
 }
 function refreshCurrentView() {
-  if (currentView === 'arrivals') renderArrivals();
+  if (currentView === 'gallery') renderGallery();
+  else if (currentView === 'arrivals') renderArrivals();
   else if (currentView === 'sale') renderSale();
   else if (currentView === 'sold') renderSold();
   else if (currentView === 'insights') renderInsights();
@@ -2081,6 +2084,138 @@ function metricCard(value, label, cls = '') {
 }
 function insightCard(title, inner) { return inner ? `<div class="insight-card"><h3>${esc(title)}</h3>${inner}</div>` : ''; }
 
+// ---- Gallery (image wall) ----
+// A dense wall of lead photos. Captions (brand/model + status) fade in on
+// hover, or can be pinned on for every tile via the toolbar toggle. Photo-less
+// yoyos are omitted — this view is about the images. Clicking a tile opens the
+// detail modal, stepping through the gallery's own ordered list.
+let galleryShowInfo = false;
+let gallerySize = 'md';
+
+// Owned yoyos that actually have a photo, favourites surfaced first so the wall
+// opens on the good stuff (otherwise the collection's brand order is kept).
+function galleryYoyos() {
+  return ownedYoyos()
+    .filter((y) => y.photos && y.photos[0])
+    .sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
+}
+
+function renderGallery() {
+  const wrap = $('#viewGallery');
+  const list = galleryYoyos();
+  const total = ownedYoyos().length;
+  const missing = total - list.length;
+  const bar = `<section class="gallery-bar">
+      <button id="galInfoBtn" class="btn btn-ghost" aria-pressed="${galleryShowInfo}" title="Pin brand & model on every tile">${SVG.tag} Info</button>
+      <label class="inline-label">Size
+        <select id="galSize" class="select select-sm">
+          <option value="sm"${gallerySize === 'sm' ? ' selected' : ''}>Small</option>
+          <option value="md"${gallerySize === 'md' ? ' selected' : ''}>Medium</option>
+          <option value="lg"${gallerySize === 'lg' ? ' selected' : ''}>Large</option>
+        </select>
+      </label>
+      <span class="ctrl-spacer"></span>
+      <span class="gallery-count">${list.length} photo${list.length === 1 ? '' : 's'}${missing > 0 ? ` · ${missing} without` : ''}</span>
+    </section>`;
+
+  if (!list.length) {
+    wrap.innerHTML = bar + '<div class="empty"><strong>No photos yet</strong><span>Add photos to your yoyos and they’ll appear here as a wall.</span></div>';
+    wireGalleryBar();
+    return;
+  }
+
+  const ids = list.map((y) => y.id);
+  const tiles = list.map((y) => {
+    const p = y.photos[0];
+    const badge = isForSale(y.sale_status) ? `<span class="gal-badge sale">${esc(y.sale_status)}</span>`
+      : y.sale_status === 'Sold' ? '<span class="gal-badge sold">Sold</span>' : '';
+    const fav = y.favorite ? `<span class="gal-fav">${SVG.star}</span>` : '';
+    return `<button class="gallery-tile" data-gal="${y.id}" aria-label="${esc(y.brand)} ${esc(y.model)}">
+        <img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(p.url)}'" />
+        ${fav}${badge}
+        <span class="gal-cap"><span class="gal-brand">${esc(y.brand) || '—'}</span><span class="gal-model">${esc(y.model)}</span></span>
+      </button>`;
+  }).join('');
+
+  wrap.innerHTML = bar + `<section class="gallery-grid ${galleryShowInfo ? 'show-info' : ''}" data-size="${gallerySize}">${tiles}</section>`;
+  wrap.querySelectorAll('[data-gal]').forEach((el) =>
+    el.addEventListener('click', () => openDetail(Number(el.dataset.gal), ids)));
+  wireGalleryBar();
+}
+
+// Toggle info-pin and size in place (no full re-render → no image reflow flash).
+function wireGalleryBar() {
+  const info = $('#galInfoBtn');
+  if (info) info.addEventListener('click', () => {
+    galleryShowInfo = !galleryShowInfo;
+    info.setAttribute('aria-pressed', String(galleryShowInfo));
+    const g = $('#viewGallery .gallery-grid'); if (g) g.classList.toggle('show-info', galleryShowInfo);
+  });
+  const size = $('#galSize');
+  if (size) size.addEventListener('change', () => {
+    gallerySize = size.value;
+    const g = $('#viewGallery .gallery-grid'); if (g) g.setAttribute('data-size', gallerySize);
+  });
+}
+
+// ---- Insights helpers: yoyo of the day + spec averages ----
+// Deterministic pick that's stable for a calendar day and rotates daily.
+// Prefers photographed yoyos so the feature always has an image; orders the
+// pool by id so the choice doesn't jump around when the collection's sort does.
+function yoyoOfTheDay(list) {
+  if (!list.length) return null;
+  const withPhoto = list.filter((y) => y.photos && y.photos[0]);
+  const pool = (withPhoto.length ? withPhoto : list).slice().sort((a, b) => a.id - b.id);
+  const now = new Date();
+  const dayNum = Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000);
+  return pool[dayNum % pool.length];
+}
+
+function avgSpec(list, key) {
+  const vals = list.map((y) => y[key]).filter((v) => v != null && !Number.isNaN(Number(v)));
+  return vals.length ? vals.reduce((a, b) => a + Number(b), 0) / vals.length : null;
+}
+
+function yotdHTML(list) {
+  const y = yoyoOfTheDay(list);
+  if (!y) return '';
+  const p = y.photos && y.photos[0];
+  const media = p
+    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />`
+    : '<span class="placeholder"></span>';
+  const chips = [];
+  if (y.composition) chips.push(esc(fmtField('composition', y.composition)));
+  if (y.condition) chips.push(esc(y.condition));
+  if (y.color) chips.push(esc(y.color));
+  const specs = [];
+  if (y.weight_g != null) specs.push(`${trimNum(y.weight_g)} g`);
+  if (y.diameter_mm != null) specs.push(`${trimNum(y.diameter_mm)} mm`);
+  if (y.width_mm != null) specs.push(`${trimNum(y.width_mm)} mm wide`);
+  return `<div class="yotd" data-arr="${y.id}" role="button" tabindex="0" aria-label="Yoyo of the day: ${esc(y.brand)} ${esc(y.model)}">
+      <div class="yotd-media">${media}</div>
+      <div class="yotd-body">
+        <div class="yotd-eyebrow">${SVG.star}<span>Yoyo of the day</span></div>
+        <div class="yotd-name">${esc(y.brand)} ${esc(y.model)}</div>
+        ${chips.length ? `<div class="yotd-chips">${chips.map((c) => `<span class="tag">${c}</span>`).join('')}</div>` : ''}
+        ${specs.length ? `<div class="yotd-specs">${specs.join(' · ')}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function avgSpecsHTML(list) {
+  const defs = [
+    { key: 'weight_g', label: 'Avg weight', unit: ' g' },
+    { key: 'diameter_mm', label: 'Avg diameter', unit: ' mm' },
+    { key: 'width_mm', label: 'Avg width', unit: ' mm' },
+    { key: 'gap_mm', label: 'Avg gap', unit: ' mm' },
+  ];
+  const cards = defs.map((d) => {
+    const v = avgSpec(list, d.key);
+    return v == null ? '' : metricCard(v.toFixed(1) + d.unit, d.label);
+  }).join('');
+  return cards ? insightCard('Average specs', `<div class="metrics-grid">${cards}</div>`) : '';
+}
+
 // Renders the Insights view: headline metrics, standout yoyos (most valuable,
 // best deal, heaviest/lightest), and bar charts. Financial metrics (value,
 // spend, savings, best-deal) are owner-only — public viewers see counts only.
@@ -2160,7 +2295,7 @@ function renderInsights() {
   const chartGrid = (compCard || priceCard) ? `<div class="chart-grid">${compCard}${priceCard}</div>` : '';
 
   const note = !admin ? `<div class="insight-note">${SVG.lock}<span>Log in to see value, savings, and spending insights.</span></div>` : '';
-  wrap.innerHTML = `<div class="metrics-grid">${metrics}</div>${note}${standoutsHTML}${chartGrid}${brandChart}${spendChart}`;
+  wrap.innerHTML = `${yotdHTML(owned)}<div class="metrics-grid">${metrics}</div>${note}${avgSpecsHTML(owned)}${standoutsHTML}${chartGrid}${brandChart}${spendChart}`;
   wrap.querySelectorAll('[data-arr]').forEach((el) => el.addEventListener('click', () => openDetail(Number(el.dataset.arr))));
 }
 
