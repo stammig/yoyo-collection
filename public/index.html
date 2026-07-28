@@ -408,16 +408,18 @@
   <datalist id="shapeList"></datalist>
 
   <!-- Detail (read-only) modal -->
-  <div id="detailModal" class="modal hidden">
+  <div id="detailModal" class="modal detail-sheet hidden">
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
       <div class="modal-head">
-        <h2 id="detailTitle">Yoyo</h2>
         <div class="detail-nav">
           <button id="detailPrev" class="icon-btn" title="Previous (←)" aria-label="Previous">‹</button>
           <button id="detailNext" class="icon-btn" title="Next (→)" aria-label="Next">›</button>
         </div>
-        <button class="icon-btn" data-close aria-label="Close">✕</button>
+        <h2 id="detailTitle" class="sheet-title">Yoyo</h2>
+        <span class="spacer"></span>
+        <button type="button" id="detailEdit" class="btn">Edit</button>
+        <button class="btn btn-ghost" data-close aria-label="Close">Close</button>
       </div>
       <div id="detailBody" class="detail-body"></div>
       <div class="modal-foot">
@@ -425,8 +427,6 @@
         <span class="spacer"></span>
         <button type="button" id="detailCopyLink" class="btn btn-ghost" title="Copy a shareable link to this yoyo">🔗 Copy link</button>
         <button type="button" id="detailShare" class="btn btn-ghost" title="Download a shareable card image">⤓ Share card</button>
-        <button type="button" class="btn btn-ghost" data-close>Close</button>
-        <button type="button" id="detailEdit" class="btn btn-primary">✎ Edit</button>
       </div>
     </div>
   </div>
