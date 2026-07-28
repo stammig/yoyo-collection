@@ -97,11 +97,15 @@
             <button id="clearFilters" class="btn btn-ghost hidden">Clear all</button>
           </section>
           <section class="active-filters hidden" id="activeFilters"></section>
+          <section class="maker-row" id="makerRow">
+            <div class="maker-chips" id="makerChips"></div>
+            <span class="throws-count" id="throwsCount"></span>
+          </section>
 
           <section class="viewbar">
             <div class="seg" role="group" aria-label="View mode">
-              <button id="viewTile" class="seg-btn" data-view="tile">Tiles</button>
-              <button id="viewRow" class="seg-btn" data-view="row">List</button>
+              <button id="viewTile" class="seg-btn" data-view="tile">Shelf</button>
+              <button id="viewRow" class="seg-btn" data-view="row">Ledger</button>
             </div>
 
             <label id="sizeWrap" class="inline-label">Size

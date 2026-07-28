@@ -491,11 +491,135 @@ function render() {
   const start = (view.page - 1) * size;
   const pageItems = view.pageSize === 'all' ? all : all.slice(start, start + size);
 
-  if (view.mode === 'row') renderRows(pageItems);
-  else renderTiles(pageItems);
-
-  renderPager(all.length, start, pageItems.length, totalPages);
+  renderMakerChips(all);
+  applyModeChrome();
+  if (view.mode === 'row') {
+    renderRows(pageItems);
+    renderPager(all.length, start, pageItems.length, totalPages);
+  } else {
+    renderShelf(all);
+    $('#pager').classList.add('hidden');
+  }
   syncViewControls();
+}
+
+// Shelf/Ledger share one Collection header; toggle the chrome that only makes
+// sense in one mode (stat cards, tile-size, column picker are Ledger-only).
+function applyModeChrome() {
+  const shelf = view.mode !== 'row';
+  $('#stats').classList.toggle('hidden', shelf);
+  document.querySelector('.fields-menu')?.classList.toggle('hidden', shelf);
+  $('#pageSize')?.closest('.inline-label')?.classList.toggle('hidden', shelf);
+}
+
+// Maker filter chips (All makers + each maker with its count, most first). The
+// tally is over the whole owned collection so every maker stays reachable
+// regardless of the active brand filter.
+function makerTally(list) {
+  const m = new Map();
+  for (const y of list) { const b = y.brand || '—'; m.set(b, (m.get(b) || 0) + 1); }
+  return [...m.entries()].map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+function renderMakerChips(all) {
+  const wrap = $('#makerChips'); if (!wrap) return;
+  const makers = makerTally(ownedYoyos());
+  const active = filters.brands;
+  const chip = (name, label, on) => `<button class="maker-chip${on ? ' active' : ''}" data-maker="${esc(name)}">${esc(label)}</button>`;
+  wrap.innerHTML = chip('', 'All makers', !active.length) +
+    makers.map((mk) => chip(mk.name, `${mk.name} ${mk.count}`, active.includes(mk.name))).join('');
+  wrap.querySelectorAll('[data-maker]').forEach((el) => el.addEventListener('click', () => {
+    const mk = el.dataset.maker;
+    filters.brands = mk ? [mk] : [];
+    view.page = 1; render();
+  }));
+  const n = all.length;
+  const tc = $('#throwsCount'); if (tc) tc.textContent = `${n} ${n === 1 ? 'throw' : 'throws'} shown`;
+}
+
+// ── Shelf view (photo-led): a featured throw, then circular thumbnails
+// grouped by maker. Replaces the old tile grid. ──
+function renderShelf(all) {
+  grid.className = 'shelf';
+  if (!all.length) { grid.innerHTML = ''; return; }
+  const featured = all.find((y) => y.favorite && y.in_hand) || all.find((y) => y.favorite) || all[0];
+  const byMaker = new Map();
+  for (const y of all) { const b = y.brand || '—'; (byMaker.get(b) || byMaker.set(b, []).get(b)).push(y); }
+  const groups = [...byMaker.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const ids = all.map((y) => y.id);
+
+  grid.innerHTML = shelfHeroHTML(featured) + groups.map(([maker, items]) => shelfGroupHTML(maker, items, featured)).join('');
+
+  grid.querySelectorAll('[data-open]').forEach((el) =>
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-editid]')) return; openDetail(Number(el.dataset.open), ids); }));
+  grid.querySelectorAll('[data-editid]').forEach((el) =>
+    el.addEventListener('click', (e) => { e.stopPropagation(); openEdit(Number(el.dataset.editid), false); }));
+  grid.querySelectorAll('[data-addmaker]').forEach((el) =>
+    el.addEventListener('click', () => {
+      openAdd();
+      const bf = document.querySelector('#yoyoForm [name="brand"]');
+      if (bf) { bf.value = el.dataset.addmaker; bf.dispatchEvent(new Event('input', { bubbles: true })); }
+    }));
+}
+
+function dialHTML(value, label, tone = '') {
+  return `<div class="dial ${tone}"><span class="dial-val">${esc(String(value))}</span><span class="dial-label">${esc(label)}</span></div>`;
+}
+function shelfHeroHTML(y) {
+  const p = y.photos && y.photos[0];
+  const media = p
+    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`
+    : '<span class="placeholder"></span>';
+  const sub = [y.brand, y.color, y.edition].filter(Boolean).join(' · ');
+  const estVal = y.market_value != null ? money0(y.market_value) : (y.retail != null ? money0(y.retail) : '—');
+  const dials = dialHTML(y.weight_g != null ? trimNum(y.weight_g) : '—', 'grams')
+    + dialHTML(y.diameter_mm != null ? trimNum(y.diameter_mm) : '—', 'mm')
+    + dialHTML(estVal, 'est. value', 'gold')
+    + dialHTML(y.condition || '—', 'condition', 'accent');
+  const desc = y.description ? `<p class="hero-desc">${esc(String(y.description).slice(0, 220))}</p>` : '';
+  return `<section class="shelf-hero">
+    <div class="hero-media">${media}<span class="hero-deco deco-a"></span><span class="hero-deco deco-b"></span></div>
+    <div class="hero-body">
+      <div class="kicker">On the stand this month</div>
+      <h2 class="hero-name">${esc(y.brand)} ${esc(y.model)}</h2>
+      ${sub ? `<div class="hero-sub">${esc(sub)}</div>` : ''}
+      ${desc}
+      <div class="hero-dials">${dials}</div>
+      <div class="hero-actions">
+        <button class="btn btn-primary" data-open="${y.id}">See full details</button>
+        ${canEditState ? `<button class="btn" data-editid="${y.id}">Edit</button>` : ''}
+      </div>
+    </div>
+  </section>`;
+}
+function shelfSub(y) {
+  if (!y.in_hand) return { cls: 'state', text: 'on order' };
+  if (isForSale(y.sale_status)) return { cls: 'state', text: y.sale_status };
+  if (y.sale_status === 'Sold') return { cls: 'muted', text: 'sold' };
+  return { cls: 'muted', text: y.color || '' };
+}
+function shelfGroupHTML(maker, items, featured) {
+  const paid = items.reduce((a, y) => a + (y.paid || 0), 0);
+  const meta = `${items.length} ${items.length === 1 ? 'throw' : 'throws'}${paid ? ` · ${money0(paid)} paid` : ''}`;
+  const tiles = items.map((y) => {
+    const p = y.photos && y.photos[0];
+    const feat = y.id === featured.id ? ' featured' : '';
+    const media = p
+      ? `<img src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`
+      : '<span class="placeholder"></span>';
+    const sub = shelfSub(y);
+    return `<button class="shelf-tile" data-open="${y.id}">
+      <span class="shelf-thumb${feat}">${media}</span>
+      <span class="shelf-name">${esc(y.model)}</span>
+      <span class="shelf-subline ${sub.cls}">${esc(sub.text)}</span>
+    </button>`;
+  }).join('');
+  const addBtn = canEditState
+    ? `<button class="shelf-add" data-addmaker="${esc(maker)}" title="Add to ${esc(maker)}" aria-label="Add to ${esc(maker)}">＋</button>` : '';
+  return `<section class="maker-group">
+    <header class="maker-head"><span class="kicker maker-name">${esc(maker)}</span><span class="maker-meta">${esc(meta)}</span></header>
+    <div class="shelf-grid">${tiles}${addBtn}</div>
+  </section>`;
 }
 
 // Placeholder cards shown while the initial /api/yoyos request is in flight.
@@ -707,13 +831,13 @@ function renderPager(total, start, shown, totalPages) {
 function syncViewControls() {
   $('#viewTile').classList.toggle('active', view.mode === 'tile');
   $('#viewRow').classList.toggle('active', view.mode === 'row');
-  $('#sizeWrap').classList.toggle('hidden', view.mode !== 'tile');
+  $('#sizeWrap').classList.add('hidden'); // tile-size is obsolete under Shelf/Ledger
   $('#tileSize').value = view.size;
   $('#pageSize').value = String(view.pageSize);
   $('#sort').value = filters.sort;
   $('#sortDirBtn').textContent = filters.sortDir === 'asc' ? '↑' : '↓';
   $('#sortDirBtn').title = filters.sortDir === 'asc' ? 'Ascending' : 'Descending';
-  $('#selectBtn').classList.toggle('hidden', !canEditState);
+  $('#selectBtn').classList.toggle('hidden', !canEditState || view.mode !== 'row');
   $('#selectBtn').classList.toggle('active', selectMode);
   // Inline cell editing only makes sense in the list view.
   const showEdit = canEditState && view.mode === 'row';
