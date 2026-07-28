@@ -1448,3 +1448,15 @@ body.share-mode .topbar { display: none; }
 .dropzone { border: 2px dashed var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
 .dropzone:hover { border-color: var(--accent); }
 .dz-icon { border-radius: 50%; background: var(--surface-3); }
+
+/* ── Insights: circular metric dials ── */
+.metric-dials { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 26px; }
+.idial { width: 132px; height: 132px; border-radius: 50%; background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: none; }
+.idial-val { font-family: var(--font-heading); font-weight: 400; font-size: 25px; line-height: 1; color: var(--text); text-align: center; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.idial-label { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.idial.soft { background: var(--accent-soft); }
+.idial.accent { background: var(--accent); }
+.idial.accent .idial-val, .idial.accent .idial-label { color: var(--on-accent); }
+.idial.gold { background: var(--gold-soft); }
+.idial.gold .idial-val { color: var(--gold-deep); }
+@media (max-width: 620px) { .idial { width: 108px; height: 108px; } .idial-val { font-size: 21px; } }

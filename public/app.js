@@ -270,7 +270,7 @@ function groupThousands(s) {
 // prefix ($, +) and suffix (%, d, g) and thousands grouping.
 function animateCounters(root) {
   if (!root || prefersReducedMotion()) return;
-  root.querySelectorAll('.stat-num, .metric-value').forEach((el) => {
+  root.querySelectorAll('.stat-num, .metric-value, .idial-val, .band-num').forEach((el) => {
     if (el.dataset.counting === '1') return;
     const raw = el.textContent;
     const m = raw.match(/[\d,]*\.?\d+/);
@@ -2242,6 +2242,10 @@ function compositionTally() {
 function metricCard(value, label, cls = '') {
   return `<div class="metric-card"><div class="metric-value ${cls}">${esc(value)}</div><div class="metric-label">${esc(label)}</div></div>`;
 }
+// Circular readout dial for the Insights headline metrics.
+function insightDial(value, label, tone = '') {
+  return `<div class="idial ${tone}"><span class="idial-val">${esc(String(value))}</span><span class="idial-label">${esc(label)}</span></div>`;
+}
 function insightCard(title, inner) { return inner ? `<div class="insight-card"><h3>${esc(title)}</h3>${inner}</div>` : ''; }
 
 // ---- Gallery (image wall) ----
@@ -2401,26 +2405,18 @@ function renderInsights() {
   const nets = soldYoyos.map(saleNet).filter((v) => v != null);
   const totalNet = nets.length ? nets.reduce((a, b) => a + b, 0) : null;
 
-  let metrics = metricCard(String(count), 'Yoyos');
+  let metrics = insightDial(String(count), 'Throws');
   if (admin) {
-    metrics += metricCard(String(inHand), 'In hand');
-    metrics += metricCard(String(count - inHand), 'On order');
-    metrics += metricCard(money0(totalRetail), 'Collection value', 'accent');
-    metrics += metricCard(money0(totalPaid), 'Total paid');
-    metrics += metricCard(money0(saved), 'Saved', 'green');
-    if (avgDiscount != null) metrics += metricCard(`${Math.round(avgDiscount)}%`, 'Avg discount', 'green');
-    if (avgPaid != null) metrics += metricCard(money0(avgPaid), 'Avg paid');
-    if (soldYoyos.length) {
-      metrics += metricCard(String(soldYoyos.length), 'Sold');
-      metrics += metricCard(money0(recovered), 'Recovered', 'green');
-      metrics += metricCard(money0(netSpent), 'Net spent');
-      if (totalNet != null) {
-        metrics += metricCard(`${totalNet >= 0 ? '+' : '−'}${money0(Math.abs(totalNet))}`, 'Sale net',
-          totalNet >= 0 ? 'green' : 'red');
-      }
+    metrics += insightDial(String(inHand), 'In hand');
+    metrics += insightDial(String(count - inHand), 'On the way', 'soft');
+    metrics += insightDial(money0(totalRetail), 'Retail value', 'accent');
+    metrics += insightDial(money0(totalPaid), 'Total paid');
+    metrics += insightDial(money0(recovered), 'Recovered', 'gold');
+    if (soldYoyos.length && totalNet != null) {
+      metrics += insightDial(`${totalNet >= 0 ? '+' : '−'}${money0(Math.abs(totalNet))}`, 'Sale net', totalNet >= 0 ? 'soft' : '');
     }
   } else {
-    metrics += metricCard(String(new Set(owned.map((y) => y.brand).filter(Boolean)).size), 'Brands');
+    metrics += insightDial(String(new Set(owned.map((y) => y.brand).filter(Boolean)).size), 'Brands');
   }
 
   const standouts = [];
@@ -2455,7 +2451,7 @@ function renderInsights() {
   const chartGrid = (compCard || priceCard) ? `<div class="chart-grid">${compCard}${priceCard}</div>` : '';
 
   const note = !admin ? `<div class="insight-note">${SVG.lock}<span>Log in to see value, savings, and spending insights.</span></div>` : '';
-  wrap.innerHTML = `${yotdHTML(owned)}<div class="metrics-grid">${metrics}</div>${note}${avgSpecsHTML(owned)}${standoutsHTML}${chartGrid}${brandChart}${spendChart}`;
+  wrap.innerHTML = `${yotdHTML(owned)}<div class="metric-dials">${metrics}</div>${note}${avgSpecsHTML(owned)}${standoutsHTML}${chartGrid}${brandChart}${spendChart}`;
   wrap.querySelectorAll('[data-arr]').forEach((el) => el.addEventListener('click', () => openDetail(Number(el.dataset.arr))));
 }
 
