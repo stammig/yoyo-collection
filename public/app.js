@@ -1597,7 +1597,7 @@ function renderArrivals() {
   const dim = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
   const today = new Date();
   let cells = '';
-  for (let i = 0; i < lead; i++) cells += `<div class="cal-day empty"></div>`;
+  for (let i = 0; i < lead; i++) cells += `<div class="cal-day cal-empty"></div>`;
   for (let d = 1; d <= dim; d++) {
     const date = new Date(calMonth.getFullYear(), calMonth.getMonth(), d);
     const cls = [sameDay(date, today) ? 'today' : '', (calSelected && sameDay(date, calSelected)) ? 'selected' : ''].join(' ').trim();

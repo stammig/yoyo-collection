@@ -765,14 +765,14 @@ body.read-only .card-actions { display: none; }
 .cal-nav { border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 4px 9px; border-radius: var(--radius-sm); display: inline-flex; }
 .cal-nav:hover { background: var(--hover); color: var(--text); }
 .cal-nav svg { width: 16px; height: 16px; }
-.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 6px; }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-bottom: 6px; }
 .cal-weekday { text-align: center; font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--faint); padding: 2px 0; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-day { position: relative; border: none; background: transparent; color: var(--text); height: 42px; border-radius: 9px; cursor: pointer; font-size: 0.85rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-variant-numeric: tabular-nums; transition: background 0.08s ease; }
 .cal-day:hover { background: var(--hover); }
 .cal-day.today { color: var(--accent); font-weight: 700; }
 .cal-day.selected { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.cal-day.empty { cursor: default; }
+.cal-day.cal-empty { cursor: default; }
 .cal-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .cal-day.today .cal-dot { background: var(--accent); }
 .cal-day.selected .cal-dot { background: var(--on-accent); }
