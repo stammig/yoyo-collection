@@ -26,6 +26,7 @@ let formGen = 0;             // bumped whenever the add/edit form's target chang
 let detailId = null;        // id currently shown in the read-only detail modal
 let shareMode = false;      // arrived via a /y/:id share link (focused single-yoyo view)
 let cameFromDetail = false; // whether the edit form was opened from the detail view
+let editList = [];          // ordered ids the edit form's Save & prev/next steps through (snapshot of the view it opened from)
 let canEditState = true;    // whether the current viewer can edit (false = public view)
 let trackingEnabledState = false; // whether any carrier tracking API is configured
 let demoModeState = false;  // public demo: login works but writes are blocked server-side
@@ -3019,6 +3020,7 @@ function openAdd() {
   });
   $('#deleteBtn').classList.add('hidden');
   $('#saveAddAnotherBtn').classList.remove('hidden'); // only meaningful when adding
+  $('#editNav').classList.add('hidden'); // no prev/next while adding a brand-new one
   renderPhotoStrip([]);
   renderCustomFields({});
   updatePercentOff();
@@ -3030,12 +3032,21 @@ function openAdd() {
 
 // Opens the add/edit form pre-filled with an existing yoyo's data. `fromDetail`
 // tracks whether Cancel/Save should return to the detail modal.
-function openEdit(id, fromDetail = false) {
+function openEdit(id, fromDetail = false, list) {
   const y = yoyos.find((x) => x.id === id);
   if (!y) return;
   editingId = id;
   formGen++;
   cameFromDetail = fromDetail;
+  // The ordered ids Save & prev/next step through. Set it explicitly when given
+  // a list, or when opening fresh (id not already in the current editList — so
+  // stepping, which re-enters openEdit with the neighbour, keeps the snapshot
+  // stable instead of re-deriving it from a possibly-reordered live view).
+  if (list) editList = list;
+  else if (!editList.includes(id)) {
+    editList = (fromDetail && detailList.length) ? detailList.slice() : filteredYoyos().map((x) => x.id);
+  }
+  syncEditNav(id);
   $('#detailModal').classList.add('hidden'); // hide detail while editing
   $('#modalTitle').textContent = `${y.brand} ${y.model}`.trim() || 'Edit Yoyo';
   $('#saveBtn').textContent = 'Save changes';
@@ -3266,6 +3277,7 @@ function closeModal() {
   const id = editingId;
   editingId = null;
   formGen++;
+  editList = []; // next open re-derives the step list from its originating view
   // If the form was opened from the detail view, return to it.
   if (id && cameFromDetail) { cameFromDetail = false; openDetail(id); }
 }
@@ -3276,16 +3288,23 @@ form.addEventListener('input', (e) => {
   updateHero();
 });
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  if (demoGuard()) return;
-  const myGen = formGen; // snapshot: detects if the form's target changes while this save is in flight
+// Snapshots the current form state into the API payload shape. Shared by the
+// normal submit and by Save & prev/next (editStep).
+function collectFormData() {
   const data = Object.fromEntries(new FormData(form).entries());
   data.in_hand = form.in_hand.checked;
   data.favorite = form.favorite.checked;
   data.retired = form.retired.checked;
   data.custom = collectCustom();
   delete data.id;
+  return data;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (demoGuard()) return;
+  const myGen = formGen; // snapshot: detects if the form's target changes while this save is in flight
+  const data = collectFormData();
 
   const targetId = editingId; // capture now — editingId may be reassigned while we await below
   const isNew = !targetId;
@@ -3322,6 +3341,7 @@ form.addEventListener('submit', async (e) => {
       modal.classList.add('hidden');
       editingId = null;
       cameFromDetail = false;
+      editList = [];
       openDetail(targetId); // edited existing: show the updated detail view
     }
   } catch (err) {
@@ -3330,6 +3350,45 @@ form.addEventListener('submit', async (e) => {
 });
 
 $('#saveAddAnotherBtn').addEventListener('click', () => { addAnother = true; form.requestSubmit(); });
+
+// ---- Edit form: Save & prev/next ----
+// Shows the prev/next arrows in the edit head only when there's a real
+// neighbour to step to, and enables/disables each end.
+function syncEditNav(id) {
+  const nav = $('#editNav');
+  if (!nav) return;
+  const i = editList.indexOf(id);
+  const canNav = i >= 0 && editList.length > 1;
+  nav.classList.toggle('hidden', !canNav);
+  $('#editPrev').disabled = i <= 0;
+  $('#editNext').disabled = i < 0 || i >= editList.length - 1;
+}
+// Saves the current edits, then re-opens the neighbouring yoyo already in edit
+// mode. Only reachable for existing yoyos (the nav is hidden while adding), so
+// this is always a straightforward PUT.
+async function editStep(dir) {
+  if (!editingId) return;
+  const i = editList.indexOf(editingId);
+  if (i < 0) return;
+  const j = i + dir;
+  if (j < 0 || j >= editList.length) return;
+  if (demoGuard()) return;
+  const targetId = editingId;
+  const myGen = formGen;
+  try {
+    await api(`/api/yoyos/${targetId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collectFormData()),
+    });
+    await loadAll();
+    if (formGen !== myGen) return; // form moved on while saving — leave it be
+    openEdit(editList[j], cameFromDetail); // editList unchanged → snapshot preserved
+    toast('Saved', 'ok');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+$('#editPrev').addEventListener('click', () => editStep(-1));
+$('#editNext').addEventListener('click', () => editStep(1));
 
 // ---- Delete yoyo ----
 $('#deleteBtn').addEventListener('click', async () => {
