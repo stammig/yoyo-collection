@@ -413,6 +413,16 @@ input:focus, textarea:focus, .select:focus, .search:focus { border-color: var(--
 .data-table th.col-th { cursor: grab; }
 .data-table th.col-th.dragging { opacity: 0.45; }
 .data-table th.col-th.drop-target { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Saved-views popover */
+.view-item { display: flex; align-items: center; gap: 4px; }
+.view-item .pop-action { flex: 1 1 auto; }
+.view-item .col-remove { flex: none; }
+.pop-empty { padding: 6px 10px; color: var(--muted); font-size: 0.82rem; }
+
+/* Toolbar row for the JS-built ledgers (Sold, Arrivals table) */
+.ledger-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.ledger-controls .spacer { flex: 1 1 auto; }
 .pop-action { display: block; width: 100%; text-align: left; padding: 7px 10px; border: none; background: transparent; color: var(--text); font-size: 0.84rem; border-radius: 5px; cursor: pointer; text-decoration: none; }
 .pop-action:hover { background: var(--accent); color: var(--on-accent); }
 .pop-sep { height: 1px; background: var(--separator); margin: 4px 6px; }

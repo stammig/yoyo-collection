@@ -116,9 +116,13 @@
               </select>
             </label>
 
-            <div class="fields-menu">
+            <div class="fields-menu" id="collectionFieldsMenu">
               <button id="fieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
               <div id="fieldsPanel" class="popover hidden"></div>
+            </div>
+            <div class="fields-menu" id="collectionViewsMenu">
+              <button id="collectionViewsBtn" class="btn btn-ghost" aria-expanded="false">Views ▾</button>
+              <div id="collectionViewsPanel" class="popover popover-menu hidden"></div>
             </div>
 
             <button id="selectBtn" class="btn btn-ghost hidden" aria-pressed="false">☑ Bulk edit</button>
@@ -195,6 +199,10 @@
             <div class="fields-menu hidden" id="saleFieldsMenu">
               <button id="saleFieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
               <div id="saleFieldsPanel" class="popover hidden"></div>
+            </div>
+            <div class="fields-menu" id="saleViewsMenu">
+              <button id="saleViewsBtn" class="btn btn-ghost" aria-expanded="false">Views ▾</button>
+              <div id="saleViewsPanel" class="popover popover-menu hidden"></div>
             </div>
             <div class="seg" id="saleViewSeg" role="group" aria-label="Sale view mode">
               <button type="button" class="seg-btn" data-sale-view="tile">Grid</button>

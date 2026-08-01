@@ -512,7 +512,8 @@ function applyModeChrome(all) {
   $('#stats').classList.add('hidden');                 // replaced by the teal band in Ledger
   $('#ledgerBand').classList.toggle('hidden', !ledger || !canEditState);
   $('#ledgerFilters').classList.toggle('hidden', !ledger);
-  document.querySelector('.fields-menu')?.classList.toggle('hidden', !ledger);
+  $('#collectionFieldsMenu')?.classList.toggle('hidden', !ledger);
+  $('#collectionViewsMenu')?.classList.toggle('hidden', !ledger);
   $('#pageSize')?.closest('.inline-label')?.classList.toggle('hidden', !ledger);
   if (ledger) { renderLedgerBand(all); syncStatusSeg(); }
 }
@@ -1042,6 +1043,129 @@ function buildFieldsPanel() {
   });
 }
 
+// Generic open/close for a "Fields ▾" / "Views ▾" popover button.
+function wirePopoverToggle(btnSel, panelSel) {
+  const btn = $(btnSel), panel = $(panelSel);
+  if (!btn || !panel) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = panel.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', String(!open));
+  });
+}
+
+// ============================================================
+//  Saved views (full presets: columns + sort + filters, per page)
+// ============================================================
+// One store, keyed by page. Each view is { name, state }, where `state` is the
+// page's captured layout. Migrates the old Collection-only "smart views"
+// (filters-only) into collection on first run.
+function loadSavedViews() {
+  let store = null;
+  try { store = JSON.parse(localStorage.getItem('yoyoSavedViews') || 'null'); } catch { store = null; }
+  if (!store) {
+    store = { collection: [], sale: [], arrivals: [], sold: [] };
+    try {
+      const legacy = JSON.parse(localStorage.getItem('yoyoSmartViews') || '[]');
+      store.collection = legacy.map((v) => ({ name: v.name, state: { filters: v.filters } }));
+    } catch { /* ignore */ }
+  }
+  for (const k of ['collection', 'sale', 'arrivals', 'sold']) if (!Array.isArray(store[k])) store[k] = [];
+  return store;
+}
+let savedViews = loadSavedViews();
+function saveSavedViews() { try { localStorage.setItem('yoyoSavedViews', JSON.stringify(savedViews)); } catch { /* ignore */ } }
+
+// Per-page capture (current layout → state) and apply (state → UI). `apply`
+// tolerates partial state so legacy filters-only views still work.
+const LEDGER_PAGES = {
+  collection: {
+    capture: () => ({ fields: view.fields.slice(), sort: filters.sort, sortDir: filters.sortDir, filters: filterSnapshot() }),
+    apply: (s) => {
+      if (s.fields) view.fields = s.fields.slice();
+      if (s.sort) filters.sort = s.sort;
+      if (s.sortDir) filters.sortDir = s.sortDir;
+      if (s.filters) Object.assign(filters, JSON.parse(JSON.stringify(s.filters)));
+      if (currentView !== 'collection') setView('collection');
+      view.page = 1;
+      saveView();
+      $('#search').value = filters.q || '';
+      buildFilterPanel(); buildFieldsPanel(); syncViewControls(); render();
+    },
+  },
+  sale: {
+    capture: () => ({ fields: saleView.fields.slice(), sort: saleView.sort, sortDir: saleView.sortDir, status: saleView.status, q: saleView.q, mode: saleView.mode }),
+    apply: (s) => {
+      if (s.fields) saleView.fields = s.fields.slice();
+      if (s.sort) saleView.sort = s.sort;
+      if (s.sortDir) saleView.sortDir = s.sortDir;
+      if ('status' in s) saleView.status = s.status || '';
+      if ('q' in s) saleView.q = s.q || '';
+      if (s.mode) saleView.mode = s.mode;
+      saveSaleView(); syncSaleControls(); renderSaleBody();
+    },
+  },
+  sold: {
+    capture: () => ({ fields: soldView.fields.slice(), sort: soldView.sort, sortDir: soldView.sortDir, mode: soldView.mode }),
+    apply: (s) => {
+      if (s.fields) soldView.fields = s.fields.slice();
+      if (s.sort) soldView.sort = s.sort;
+      if (s.sortDir) soldView.sortDir = s.sortDir;
+      if (s.mode) soldView.mode = s.mode;
+      saveSoldView(); renderSold();
+    },
+  },
+};
+
+// The "Views ▾" toolbar control markup (JS-built toolbars inject this).
+function ledgerViewsControlHTML(page) {
+  return `<div class="fields-menu" id="${page}ViewsMenu">
+      <button id="${page}ViewsBtn" class="btn btn-ghost" aria-expanded="false">Views ▾</button>
+      <div id="${page}ViewsPanel" class="popover popover-menu hidden"></div>
+    </div>`;
+}
+function buildViewsPanel(page) {
+  const panel = $(`#${page}ViewsPanel`);
+  if (!panel) return;
+  const list = savedViews[page] || [];
+  panel.innerHTML =
+    `<div class="popover-head">Saved views</div>` +
+    (list.length
+      ? list.map((v, i) => `<div class="view-item">
+          <button type="button" class="pop-action view-apply" data-viewapply="${i}">${esc(v.name)}</button>
+          <button type="button" class="col-remove" data-viewdel="${i}" aria-label="Delete ${esc(v.name)}">✕</button>
+        </div>`).join('')
+      : `<div class="pop-empty">No saved views yet.</div>`) +
+    `<div class="popover-foot"><button type="button" class="link-btn" data-viewsave>＋ Save current view…</button></div>`;
+  panel.querySelectorAll('[data-viewapply]').forEach((b) => b.addEventListener('click', () => {
+    panel.classList.add('hidden');
+    LEDGER_PAGES[page].apply(list[Number(b.dataset.viewapply)].state);
+  }));
+  panel.querySelectorAll('[data-viewdel]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    savedViews[page].splice(Number(b.dataset.viewdel), 1);
+    saveSavedViews(); buildViewsPanel(page); renderSmartViews();
+  }));
+  panel.querySelector('[data-viewsave]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    panel.classList.add('hidden');
+    await saveCurrentLedgerView(page);
+  });
+}
+async function saveCurrentLedgerView(page) {
+  const name = await promptDialog({ title: 'Save view', placeholder: 'e.g. Bi-metals by weight', confirmText: 'Save' });
+  if (!name) return;
+  savedViews[page].push({ name: name.trim(), state: LEDGER_PAGES[page].capture() });
+  saveSavedViews();
+  buildViewsPanel(page);
+  renderSmartViews();
+  toast(`Saved view “${name.trim()}”.`, 'ok');
+}
+function wireLedgerViewsControl(page) {
+  buildViewsPanel(page);
+  wirePopoverToggle(`#${page}ViewsBtn`, `#${page}ViewsPanel`);
+}
+
 // ============================================================
 //  View router (Collection / Arrivals / Insights)
 // ============================================================
@@ -1348,48 +1472,38 @@ function openBulkEdit() {
 // ============================================================
 //  Smart views (saved filter sets, persisted per browser)
 // ============================================================
-let smartViews = loadSmartViews();
-function loadSmartViews() { try { return JSON.parse(localStorage.getItem('yoyoSmartViews') || '[]'); } catch { return []; } }
-function saveSmartViews() { try { localStorage.setItem('yoyoSmartViews', JSON.stringify(smartViews)); } catch { /* ignore */ } }
-// Deep-copies the current filter criteria (excluding sort) for saving as a smart view.
+// Deep-copies the current filter criteria (excluding sort) — the filter half
+// of a Collection saved view's captured state.
 function filterSnapshot() {
-  const { sort, sortDir, ...rest } = filters; // views capture criteria, not sort
+  const { sort, sortDir, ...rest } = filters; // sort is captured separately
   return JSON.parse(JSON.stringify(rest));
 }
-// Restores a saved smart view's filter criteria and re-renders the collection.
+// Apply a Collection saved view (tolerates the legacy filters-only shape).
 function applySmartView(v) {
-  const snap = JSON.parse(JSON.stringify(v.filters));
-  Object.assign(filters, snap);
-  $('#search').value = filters.q || '';
-  if (currentView !== 'collection') setView('collection');
-  view.page = 1;
-  buildFilterPanel();
-  render();
+  LEDGER_PAGES.collection.apply(v.state || { filters: v.filters });
 }
-// Prompts for a name and saves the current filter set as a reusable smart view.
+// The "＋ Save view" chip button — saves the current Collection layout+filters.
 async function saveCurrentAsView() {
-  if (!filtersActive()) { toast('Set some filters first, then save a view.', 'error'); return; }
-  const name = await promptDialog({ title: 'Save smart view', placeholder: 'e.g. Bimetal G2s under $80', confirmText: 'Save' });
-  if (!name) return;
-  smartViews.push({ name: name.trim(), filters: filterSnapshot() });
-  saveSmartViews();
-  renderSmartViews();
-  toast(`Saved view “${name.trim()}”.`, 'ok');
+  await saveCurrentLedgerView('collection');
 }
 function deleteSmartView(i) {
-  smartViews.splice(i, 1);
-  saveSmartViews();
+  savedViews.collection.splice(i, 1);
+  saveSavedViews();
   renderSmartViews();
+  buildViewsPanel('collection');
 }
-// Renders the sidebar's "Smart Views" list (owner-only, hidden when empty).
+// The sidebar's saved-views list for Collection (owner-only, hidden when
+// empty) — mirrors the toolbar Views ▾ so both stay in sync.
 function renderSmartViews() {
+  buildViewsPanel('collection');   // keep the toolbar popover current
   const wrap = $('#smartViews');
   if (!wrap) return;
-  wrap.classList.toggle('hidden', !(canEditState && smartViews.length));
-  wrap.innerHTML = '<div class="nav-section">Smart Views</div>' + smartViews.map((v, i) =>
+  const list = savedViews.collection;
+  wrap.classList.toggle('hidden', !(canEditState && list.length));
+  wrap.innerHTML = '<div class="nav-section">Saved Views</div>' + list.map((v, i) =>
     `<div class="sv-item"><button class="nav-item sv-apply" data-sv="${i}"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5h12l-4.6 5.2v4.3l-2.8 1.5V8.7z"/></svg><span>${esc(v.name)}</span></button><button class="sv-del" data-svdel="${i}" title="Delete view">✕</button></div>`
   ).join('');
-  wrap.querySelectorAll('[data-sv]').forEach((b) => b.addEventListener('click', () => applySmartView(smartViews[Number(b.dataset.sv)])));
+  wrap.querySelectorAll('[data-sv]').forEach((b) => b.addEventListener('click', () => applySmartView(list[Number(b.dataset.sv)])));
   wrap.querySelectorAll('[data-svdel]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); deleteSmartView(Number(b.dataset.svdel)); }));
 }
 
@@ -2222,6 +2336,7 @@ function syncSaleControls() {
   // The column picker only applies to the Table view (like the Ledger's).
   $('#saleFieldsMenu').classList.toggle('hidden', saleView.mode !== 'table');
   if (saleView.mode === 'table') buildSaleFieldsPanel();
+  buildViewsPanel('sale');
 }
 // Re-renders just the stats + item list + selection bar (never the toolbar
 // itself) — the function every seller-tools interaction calls.
@@ -2377,10 +2492,89 @@ function soldCardHTML(y) {
 // first, with a ledger in logical order — how many sold, what they brought
 // in, what they cost, and the net profit/loss (only over sales whose cost
 // is known, noted when that's a subset).
+// ---- Sold view: Cards (default) + a configurable Table, at parity with the
+// other ledgers. Tailored default columns lead with the economics that matter
+// for a completed sale (when, to whom, cost → proceeds → net). ----
+const SOLD_DEFAULT_FIELDS = ['sold_date', 'buyer', 'paid', 'proceeds', 'net'];
+let soldView = loadSoldView();
+function loadSoldView() {
+  const defaults = { mode: 'cards', sort: 'sold_date', sortDir: 'desc', fields: SOLD_DEFAULT_FIELDS.slice() };
+  try {
+    const v = { ...defaults, ...JSON.parse(localStorage.getItem('yoyoSoldView') || '{}') };
+    if (!Array.isArray(v.fields) || !v.fields.length) v.fields = SOLD_DEFAULT_FIELDS.slice();
+    return v;
+  } catch { return defaults; }
+}
+function saveSoldView() { try { localStorage.setItem('yoyoSoldView', JSON.stringify(soldView)); } catch { /* ignore */ } }
+// Proceeds and net are computed, not stored — expose them as synthetic columns.
+function soldFieldChoices() {
+  return [
+    { key: 'proceeds', label: 'Proceeds', num: true, synthetic: true },
+    { key: 'net', label: 'Net P&L', num: true, synthetic: true },
+    ...ALL_FIELDS,
+  ];
+}
+function soldColumns() {
+  const byKey = Object.fromEntries(soldFieldChoices().map((c) => [c.key, c]));
+  return soldView.fields.map((k) => byKey[k]).filter(Boolean);
+}
+function soldSortValue(y, key) {
+  if (key === 'proceeds') return recoveredAmount(y);
+  if (key === 'net') return saleNet(y);
+  return valueOf(y, key);
+}
+function soldFilteredSorted() {
+  const items = yoyos.filter(isSold);
+  const key = soldView.sort;
+  const numeric = key === 'proceeds' || key === 'net' || FIELD_BY_KEY[key]?.num || NUMERIC_KEYS.has(key);
+  const flip = soldView.sortDir === 'desc' ? -1 : 1;
+  items.sort((a, b) => {
+    let r;
+    if (numeric) r = (soldSortValue(a, key) ?? -Infinity) - (soldSortValue(b, key) ?? -Infinity);
+    else r = String(soldSortValue(a, key) ?? '').localeCompare(String(soldSortValue(b, key) ?? ''));
+    if (r === 0) r = String(b.sold_date || '').localeCompare(String(a.sold_date || ''));
+    return r * flip;
+  });
+  return items;
+}
+function soldCellHTML(y, c) {
+  if (c.key === 'proceeds') return `<td class="num">${money0(recoveredAmount(y))}</td>`;
+  if (c.key === 'net') {
+    const n = saleNet(y);
+    if (n == null) return `<td class="num muted-sm">—</td>`;
+    return `<td class="num sale-net ${n >= 0 ? 'pos' : 'neg'}">${n >= 0 ? '+' : '−'}${money0(Math.abs(n))}</td>`;
+  }
+  return `<td class="${c.num ? 'num' : ''}">${esc(fmtField(c.key, valueOf(y, c.key)))}</td>`;
+}
+function soldTableHTML(items) {
+  const cols = soldColumns();
+  const arrow = (key) => (soldView.sort === key ? (soldView.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const th = (key, label, extra = '') => `<th class="sortable ${extra} ${soldView.sort === key ? 'sorted' : ''}" data-sold-sort="${key}">${esc(label)}${arrow(key)}</th>`;
+  const thCol = (c) => `<th class="sortable col-th ${c.num ? 'num' : ''} ${soldView.sort === c.key ? 'sorted' : ''}" data-sold-sort="${c.key}" data-colkey="${c.key}">${esc(c.label)}${arrow(c.key)}</th>`;
+  const head = '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') + cols.map(thCol).join('');
+  const rows = items.map((y) => {
+    const thumb = y.photos[0]
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      : '<span class="row-thumb placeholder"></span>';
+    return `<tr data-id="${y.id}">
+        <td class="col-photo">${thumb}</td>
+        <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
+        ${cols.map((c) => soldCellHTML(y, c)).join('')}
+      </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function buildSoldFieldsPanel() {
+  buildColumnPanel($('#soldFieldsPanel'), {
+    fields: soldView.fields,
+    choices: soldFieldChoices(),
+    defaults: SOLD_DEFAULT_FIELDS,
+    onChange: (next) => { soldView.fields = next; saveSoldView(); renderSold(); },
+  });
+}
 function renderSold() {
   const wrap = $('#viewSold');
-  const items = yoyos.filter(isSold)
-    .sort((a, b) => String(b.sold_date || '').localeCompare(String(a.sold_date || '')));
+  const items = soldFilteredSorted();
   const proceeds = items.reduce((a, y) => a + recoveredAmount(y), 0);
   const withCost = items.filter((y) => y.paid != null);
   const cost = withCost.reduce((a, y) => a + y.paid, 0);
@@ -2393,16 +2587,53 @@ function renderSold() {
     + metricCard(money0(cost), 'Cost')
     + metricCard(netTxt, netLabel, net >= 0 ? 'green' : 'red')
     + `</div>`;
-  const body = items.length
-    ? summary + `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`
-    : '<div class="insight-note">Nothing marked as sold yet.</div>';
-  wrap.innerHTML = body;
+
+  if (!items.length) {
+    wrap.innerHTML = '<div class="insight-note">Nothing marked as sold yet.</div>';
+    return;
+  }
+
+  const toolbar = `<div class="controls ledger-controls">
+      <span class="spacer"></span>
+      ${ledgerViewsControlHTML('sold')}
+      <div class="fields-menu ${soldView.mode === 'table' ? '' : 'hidden'}" id="soldFieldsMenu">
+        <button id="soldFieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
+        <div id="soldFieldsPanel" class="popover hidden"></div>
+      </div>
+      <div class="seg" id="soldViewSeg" role="group" aria-label="Sold view mode">
+        <button type="button" class="seg-btn ${soldView.mode === 'cards' ? 'active' : ''}" data-sold-view="cards">Cards</button>
+        <button type="button" class="seg-btn ${soldView.mode === 'table' ? 'active' : ''}" data-sold-view="table">Table</button>
+      </div>
+    </div>`;
+  const body = soldView.mode === 'table'
+    ? soldTableHTML(items)
+    : `<div class="sale-grid">${items.map(soldCardHTML).join('')}</div>`;
+  wrap.innerHTML = summary + toolbar + body;
+
   const soldList = items.map((y) => y.id);
-  wrap.querySelectorAll('.sale-card[data-id]').forEach((el) => {
+  wrap.querySelectorAll('[data-id]').forEach((el) => {
     const id = Number(el.dataset.id);
     el.addEventListener('click', () => openDetail(id, soldList));
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(id, soldList); } });
   });
+  wrap.querySelectorAll('#soldViewSeg .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    soldView.mode = b.dataset.soldView; saveSoldView(); renderSold();
+  }));
+  wrap.querySelectorAll('[data-sold-sort]').forEach((th) => th.addEventListener('click', () => {
+    const key = th.dataset.soldSort;
+    if (soldView.sort === key) soldView.sortDir = soldView.sortDir === 'asc' ? 'desc' : 'asc';
+    else { soldView.sort = key; soldView.sortDir = key === 'sold_date' ? 'desc' : 'asc'; }
+    saveSoldView(); renderSold();
+  }));
+  if (soldView.mode === 'table') {
+    buildSoldFieldsPanel();
+    wirePopoverToggle('#soldFieldsBtn', '#soldFieldsPanel', '#soldFieldsMenu');
+    wireHeaderReorder([...wrap.querySelectorAll('th.col-th')], {
+      fields: soldView.fields,
+      onChange: (next) => { soldView.fields = next; saveSoldView(); renderSold(); },
+    });
+  }
+  wireLedgerViewsControl('sold', wrap);
 }
 
 // ============================================================
@@ -3796,24 +4027,15 @@ $('#pageSize').addEventListener('change', (e) => {
 $('#prevPage').addEventListener('click', () => { if (view.page > 1) { view.page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
 $('#nextPage').addEventListener('click', () => { view.page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
 
-// Fields popover
-$('#fieldsBtn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const panel = $('#fieldsPanel');
-  const open = panel.classList.toggle('hidden');
-  $('#fieldsBtn').setAttribute('aria-expanded', String(!open));
-});
+// Fields / Views popovers. Toggles are wired per button; a single generic
+// outside-click closes any open popover whose own .fields-menu wasn't clicked.
+wirePopoverToggle('#fieldsBtn', '#fieldsPanel');
+wirePopoverToggle('#collectionViewsBtn', '#collectionViewsPanel');
+wirePopoverToggle('#saleFieldsBtn', '#saleFieldsPanel');
+wirePopoverToggle('#saleViewsBtn', '#saleViewsPanel');
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.fields-menu')) $('#fieldsPanel').classList.add('hidden');
-});
-// For Sale column picker (same behavior as the Collection Ledger's).
-$('#saleFieldsBtn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const open = $('#saleFieldsPanel').classList.toggle('hidden');
-  $('#saleFieldsBtn').setAttribute('aria-expanded', String(!open));
-});
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('#saleFieldsMenu')) $('#saleFieldsPanel').classList.add('hidden');
+  if (e.target.closest('.fields-menu')) return;
+  document.querySelectorAll('.fields-menu .popover').forEach((p) => p.classList.add('hidden'));
 });
 
 $('#addBtn').addEventListener('click', () => openAdd());
