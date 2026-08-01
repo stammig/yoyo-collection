@@ -1115,6 +1115,16 @@ const LEDGER_PAGES = {
       saveSoldView(); renderSold();
     },
   },
+  arrivals: {
+    capture: () => ({ fields: arrivalsView.fields.slice(), sort: arrivalsView.sort, sortDir: arrivalsView.sortDir, mode: arrivalsView.mode }),
+    apply: (s) => {
+      if (s.fields) arrivalsView.fields = s.fields.slice();
+      if (s.sort) arrivalsView.sort = s.sort;
+      if (s.sortDir) arrivalsView.sortDir = s.sortDir;
+      if (s.mode) arrivalsView.mode = s.mode;
+      saveArrivalsView(); renderArrivals();
+    },
+  },
 };
 
 // The "Views ▾" toolbar control markup (JS-built toolbars inject this).
@@ -1805,12 +1815,150 @@ async function queryTracking(id, btn) {
     toast(err.message || 'Tracking lookup failed.', 'error');
   }
 }
+// ---- Arrivals: Calendar (default) + a configurable Table, at parity with the
+// other ledgers. Table defaults lead with the shipment-tracking essentials. ----
+const ARRIVALS_DEFAULT_FIELDS = ['eta', 'arrives_in', 'tracking', 'seller', 'paid'];
+let arrivalsView = loadArrivalsView();
+function loadArrivalsView() {
+  const defaults = { mode: 'calendar', sort: 'arrives_in', sortDir: 'asc', fields: ARRIVALS_DEFAULT_FIELDS.slice() };
+  try {
+    const v = { ...defaults, ...JSON.parse(localStorage.getItem('yoyoArrivalsView') || '{}') };
+    if (!Array.isArray(v.fields) || !v.fields.length) v.fields = ARRIVALS_DEFAULT_FIELDS.slice();
+    return v;
+  } catch { return defaults; }
+}
+function saveArrivalsView() { try { localStorage.setItem('yoyoArrivalsView', JSON.stringify(arrivalsView)); } catch { /* ignore */ } }
+function arrivalsFieldChoices() {
+  return [{ key: 'arrives_in', label: 'Arrives in', synthetic: true }, ...ALL_FIELDS];
+}
+function arrivalsColumns() {
+  const byKey = Object.fromEntries(arrivalsFieldChoices().map((c) => [c.key, c]));
+  return arrivalsView.fields.map((k) => byKey[k]).filter(Boolean);
+}
+const cmpNum = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+function arrivalsFilteredSorted() {
+  const items = yoyos.filter((y) => !y.in_hand);
+  const key = arrivalsView.sort;
+  const numeric = FIELD_BY_KEY[key]?.num || NUMERIC_KEYS.has(key);
+  const flip = arrivalsView.sortDir === 'desc' ? -1 : 1;
+  const etaTime = (y) => { const d = parseETA(y.eta); return d ? d.getTime() : Infinity; };
+  items.sort((a, b) => {
+    let r;
+    if (key === 'arrives_in') r = cmpNum(etaTime(a), etaTime(b));
+    else if (numeric) r = cmpNum(valueOf(a, key) ?? -Infinity, valueOf(b, key) ?? -Infinity);
+    else r = String(valueOf(a, key) ?? '').localeCompare(String(valueOf(b, key) ?? ''));
+    if (r === 0) r = cmpNum(etaTime(a), etaTime(b));   // soonest-arriving tiebreak
+    return r * flip;
+  });
+  return items;
+}
+function arrivalsCellHTML(y, c) {
+  if (c.key === 'arrives_in') {
+    const d = parseETA(y.eta);
+    return `<td>${d ? esc(relativeETA(d)) : '<span class="muted-sm">No date</span>'}</td>`;
+  }
+  if (c.key === 'eta') {
+    const d = parseETA(y.eta);
+    return `<td>${d ? esc(d.toLocaleDateString()) : '—'}</td>`;
+  }
+  if (c.key === 'tracking') {
+    const url = carrierTrackingURL(y.tracking);
+    const inner = y.tracking
+      ? (url ? `<a href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(y.tracking)}</a>` : esc(y.tracking))
+      : '—';
+    return `<td>${inner}</td>`;
+  }
+  return `<td class="${c.num ? 'num' : ''}">${esc(fmtField(c.key, valueOf(y, c.key)))}</td>`;
+}
+function arrivalsTableHTML(items) {
+  const cols = arrivalsColumns();
+  const arrow = (key) => (arrivalsView.sort === key ? (arrivalsView.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const th = (key, label, extra = '') => `<th class="sortable ${extra} ${arrivalsView.sort === key ? 'sorted' : ''}" data-arr-sort="${key}">${esc(label)}${arrow(key)}</th>`;
+  const thCol = (c) => `<th class="sortable col-th ${c.num ? 'num' : ''} ${arrivalsView.sort === c.key ? 'sorted' : ''}" data-arr-sort="${c.key}" data-colkey="${c.key}">${esc(c.label)}${arrow(c.key)}</th>`;
+  const head = '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') + cols.map(thCol).join('') + '<th></th>';
+  const rows = items.map((y) => {
+    const queryBtn = trackingEnabledState
+      ? `<button type="button" class="btn btn-ghost btn-sm arr-query" data-track-query="${y.id}" title="Look up ETA from the carrier">${SVG.box}<span>Query</span></button>` : '';
+    return `<tr data-id="${y.id}">
+        ${`<td class="col-photo">${thumbHTML(y, 'row-thumb')}</td>`}
+        <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
+        ${cols.map((c) => arrivalsCellHTML(y, c)).join('')}
+        <td class="arr-actions">${queryBtn}<button type="button" class="btn btn-ghost btn-sm" data-arrived="${y.id}" title="Mark as in hand">${SVG.check}<span>Arrived</span></button></td>
+      </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function buildArrivalsFieldsPanel() {
+  buildColumnPanel($('#arrivalsFieldsPanel'), {
+    fields: arrivalsView.fields,
+    choices: arrivalsFieldChoices(),
+    defaults: ARRIVALS_DEFAULT_FIELDS,
+    onChange: (next) => { arrivalsView.fields = next; saveArrivalsView(); renderArrivals(); },
+  });
+}
+function arrivalsToolbarHTML() {
+  return `<div class="controls ledger-controls">
+      <span class="spacer"></span>
+      ${ledgerViewsControlHTML('arrivals')}
+      <div class="fields-menu ${arrivalsView.mode === 'table' ? '' : 'hidden'}" id="arrivalsFieldsMenu">
+        <button id="arrivalsFieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
+        <div id="arrivalsFieldsPanel" class="popover hidden"></div>
+      </div>
+      <div class="seg" id="arrivalsViewSeg" role="group" aria-label="Arrivals view mode">
+        <button type="button" class="seg-btn ${arrivalsView.mode === 'calendar' ? 'active' : ''}" data-arr-view="calendar">Calendar</button>
+        <button type="button" class="seg-btn ${arrivalsView.mode === 'table' ? 'active' : ''}" data-arr-view="table">Table</button>
+      </div>
+    </div>`;
+}
+// Shared toolbar wiring for both Arrivals modes (view toggle + Fields + Views).
+function wireArrivalsToolbar(wrap) {
+  wrap.querySelectorAll('#arrivalsViewSeg .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    arrivalsView.mode = b.dataset.arrView; saveArrivalsView(); renderArrivals();
+  }));
+  if (arrivalsView.mode === 'table') {
+    buildArrivalsFieldsPanel();
+    wirePopoverToggle('#arrivalsFieldsBtn', '#arrivalsFieldsPanel');
+  }
+  wireLedgerViewsControl('arrivals');
+}
+// The Arrivals table (on-order yoyos as configurable rows + per-row actions).
+function renderArrivalsTable(wrap, toolbar) {
+  const items = arrivalsFilteredSorted();
+  const intro = items.length
+    ? `<p class="arrivals-intro">${items.length} on the way. Sort or choose columns; mark one arrived and it moves onto the shelf.</p>`
+    : '<div class="insight-note">Nothing on order right now.</div>';
+  wrap.innerHTML = toolbar + intro + (items.length ? arrivalsTableHTML(items) : '');
+  wrap.querySelectorAll('tr[data-id]').forEach((el) => el.addEventListener('click', (e) => {
+    if (e.target.closest('a, button')) return;
+    openDetail(Number(el.dataset.id));
+  }));
+  wrap.querySelectorAll('[data-arr-sort]').forEach((thEl) => thEl.addEventListener('click', () => {
+    const k = thEl.dataset.arrSort;
+    if (arrivalsView.sort === k) arrivalsView.sortDir = arrivalsView.sortDir === 'asc' ? 'desc' : 'asc';
+    else { arrivalsView.sort = k; arrivalsView.sortDir = 'asc'; }
+    saveArrivalsView(); renderArrivals();
+  }));
+  wireHeaderReorder([...wrap.querySelectorAll('th.col-th')], {
+    fields: arrivalsView.fields,
+    onChange: (next) => { arrivalsView.fields = next; saveArrivalsView(); renderArrivals(); },
+  });
+  wrap.querySelectorAll('[data-arrived]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try { await patchYoyo(Number(b.dataset.arrived), { in_hand: true }); await loadAll(); toast('Marked in hand.', 'ok'); }
+    catch (err) { toast(err.message, 'error'); }
+  }));
+  wrap.querySelectorAll('[data-track-query]').forEach((b) =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); queryTracking(Number(b.dataset.trackQuery), b); }));
+  wireArrivalsToolbar(wrap);
+}
 // Renders the Arrivals view: month calendar (with a dot on days that have an
 // arrival), plus a list for the selected day or all upcoming arrivals, and a
 // separate "no date yet" section.
 function renderArrivals() {
   const wrap = $('#viewArrivals');
   if (!canEditState) { wrap.innerHTML = `<div class="insight-note">${SVG.lock}<span>Log in to track incoming yoyos.</span></div>`; return; }
+  const toolbar = arrivalsToolbarHTML();
+  if (arrivalsView.mode === 'table') { renderArrivalsTable(wrap, toolbar); return; }
   const groups = arrivalGroups();
   const monthDays = new Set(groups
     .filter((g) => g.day.getMonth() === calMonth.getMonth() && g.day.getFullYear() === calMonth.getFullYear())
@@ -1849,7 +1997,7 @@ function renderArrivals() {
   const intro = onWay
     ? `<p class="arrivals-intro">${onWay} on the way. Edit tracking or an ETA inline; mark one arrived and it moves onto the shelf.</p>`
     : '';
-  wrap.innerHTML = intro +
+  wrap.innerHTML = toolbar + intro +
     `<div class="arrivals-layout">
       <div class="cal-card">
         <div class="cal-head"><button class="cal-nav" data-cal="-1">‹</button><span class="cal-title">${esc(monthTitle)}</span><button class="cal-nav" data-cal="1">›</button></div>
@@ -1899,6 +2047,7 @@ function renderArrivals() {
     try { await patchYoyo(id, { in_hand: true }); await loadAll(); toast('Marked in hand.', 'ok'); }
     catch (err) { toast(err.message, 'error'); }
   }));
+  wireArrivalsToolbar(wrap);
 }
 
 // ============================================================
