@@ -794,12 +794,16 @@ function renderRows(items) {
   const arrow = (key) => (filters.sort === key ? (filters.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
   const th = (key, label, extra = '') =>
     `<th class="sortable ${extra} ${filters.sort === key ? 'sorted' : ''}" data-sort="${key}">${esc(label)}${arrow(key)}</th>`;
+  // Configurable columns also carry data-colkey + col-th so they can be dragged
+  // to reorder (brand/model stay pinned as the identity columns).
+  const thCol = (c) =>
+    `<th class="sortable col-th ${c.num ? 'num' : ''} ${filters.sort === c.key ? 'sorted' : ''}" data-sort="${c.key}" data-colkey="${c.key}">${esc(c.label)}${arrow(c.key)}</th>`;
   const head =
     (canEditState ? '<th class="col-sel"></th>' : '') +
     '<th class="col-photo"></th>' +
     th('brand', 'Brand') +
     th('model', 'Model') +
-    cols.map((c) => th(c.key, c.label, c.num ? 'num' : '')).join('');
+    cols.map(thCol).join('');
 
   // Built-in cells carry data-edit whenever the owner can edit, so they're
   // double-click-editable any time; single-click editing only in "Edit cells".
@@ -849,6 +853,18 @@ function renderRows(items) {
   grid.querySelectorAll('th[data-sort]').forEach((el) =>
     el.addEventListener('click', () => setSort(el.dataset.sort))
   );
+  // Drag a configurable header to reorder columns (desktop). Hidden (SENSITIVE)
+  // keys aren't shown as columns, so keep them parked after the visible order.
+  const visibleKeys = cols.map((c) => c.key);
+  wireHeaderReorder([...grid.querySelectorAll('th.col-th')], {
+    fields: visibleKeys,
+    onChange: (nextVisible) => {
+      const hidden = view.fields.filter((k) => !visibleKeys.includes(k));
+      view.fields = [...nextVisible, ...hidden];
+      saveView();
+      render();
+    },
+  });
 }
 
 // Renders the "Showing X-Y of Z" summary and a compact page-number strip
@@ -902,35 +918,127 @@ function syncViewControls() {
   if (!showEdit && listEditMode) setListEdit(false);
 }
 
-// Populates the "Fields ▾" popover with a checkbox per field the current
-// viewer is allowed to see (public viewers don't get SENSITIVE fields).
-function buildFieldsPanel() {
-  const panel = $('#fieldsPanel');
-  const choices = ALL_FIELDS.filter((f) => canEditState || !SENSITIVE.has(f.key));
-  panel.innerHTML =
-    `<div class="popover-head">Show fields</div>` +
-    choices.map((f) => `
-      <label class="pop-item">
-        <input type="checkbox" value="${f.key}" ${view.fields.includes(f.key) ? 'checked' : ''} />
-        ${esc(f.label)}
-      </label>`).join('') +
-    `<div class="popover-foot"><button type="button" id="fieldsReset" class="link-btn">Reset</button></div>`;
+// ---- Shared column ordering (Collection Ledger + For Sale table) ----
+// Both ledgers keep their visible columns as an ordered array of field keys.
+// These helpers give both the same reorderable "Columns" popover and the same
+// drag-to-reorder table headers, so the two pages behave identically.
 
-  panel.querySelectorAll('input[type=checkbox]').forEach((cb) =>
-    cb.addEventListener('change', () => {
-      view.fields = ALL_FIELDS.map((f) => f.key).filter((k) => {
-        const box = panel.querySelector(`input[value="${k}"]`);
-        return box ? box.checked : view.fields.includes(k); // keep hidden fields as-is
-      });
-      saveView();
-      render();
-    })
-  );
-  $('#fieldsReset').addEventListener('click', () => {
-    view.fields = [...DEFAULT_VIEW.fields];
-    saveView();
-    buildFieldsPanel();
-    render();
+// Move `fromKey` to sit before/after `toKey` in an ordered key array.
+function reorderKeys(keys, fromKey, toKey, after) {
+  if (fromKey === toKey) return keys.slice();
+  const out = keys.filter((k) => k !== fromKey);
+  const at = out.indexOf(toKey);
+  if (at < 0) return keys.slice();
+  out.splice(after ? at + 1 : at, 0, fromKey);
+  return out;
+}
+
+// Renders a reorderable columns popover into `panel`.
+//   fields   — current ordered array of shown keys
+//   choices  — field defs the viewer may pick from
+//   defaults — the Reset order
+//   onChange — called with the new ordered array after any edit
+// Reorder by dragging a row (mouse) or the ↑/↓ buttons (touch/keyboard) —
+// the same two-path approach the photo strip uses.
+function buildColumnPanel(panel, { fields, choices, defaults, onChange }) {
+  const byKey = Object.fromEntries(choices.map((c) => [c.key, c]));
+  const shown = fields.filter((k) => byKey[k]);
+  const hidden = choices.filter((c) => !fields.includes(c.key));
+  const rebuild = (next) => { onChange(next); buildColumnPanel(panel, { fields: next, choices, defaults, onChange }); };
+
+  panel.innerHTML =
+    `<div class="popover-head">Columns — drag or ↑↓ to reorder</div>` +
+    `<div class="col-order">` +
+      shown.map((k, i) => {
+        const f = byKey[k];
+        return `<div class="col-item" draggable="true" data-key="${esc(k)}">
+          <span class="col-grip" aria-hidden="true">${SVG.dots}</span>
+          <span class="col-label">${esc(f.label)}</span>
+          <button type="button" class="col-move" data-move="up" data-key="${esc(k)}" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(f.label)} left">↑</button>
+          <button type="button" class="col-move" data-move="down" data-key="${esc(k)}" ${i === shown.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(f.label)} right">↓</button>
+          <button type="button" class="col-remove" data-remove="${esc(k)}" aria-label="Hide ${esc(f.label)}">✕</button>
+        </div>`;
+      }).join('') +
+    `</div>` +
+    (hidden.length
+      ? `<div class="popover-head">Add a column</div><div class="col-add">` +
+        hidden.map((f) => `<button type="button" class="pop-item col-addbtn" data-add="${esc(f.key)}">＋ ${esc(f.label)}</button>`).join('') +
+        `</div>`
+      : '') +
+    `<div class="popover-foot"><button type="button" class="link-btn" data-cols-reset>Reset</button></div>`;
+
+  panel.querySelectorAll('.col-move').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const k = b.dataset.key, i = shown.indexOf(k), j = i + (b.dataset.move === 'up' ? -1 : 1);
+    if (j < 0 || j >= shown.length) return;
+    const next = shown.slice(); [next[i], next[j]] = [next[j], next[i]];
+    rebuild(next);
+  }));
+  panel.querySelectorAll('.col-remove').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation(); rebuild(fields.filter((k) => k !== b.dataset.remove));
+  }));
+  panel.querySelectorAll('.col-addbtn').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation(); rebuild([...fields, b.dataset.add]);
+  }));
+  panel.querySelector('[data-cols-reset]').addEventListener('click', (e) => {
+    e.stopPropagation(); rebuild(defaults.slice());
+  });
+
+  // Mouse drag-to-reorder within the shown list (HTML5 DnD, like the photos).
+  const list = panel.querySelector('.col-order');
+  list.querySelectorAll('.col-item').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', el.dataset.key); } catch { /* ignore */ }
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      rebuild([...list.querySelectorAll('.col-item')].map((n) => n.dataset.key));
+    });
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const dragging = list.querySelector('.col-item.dragging');
+      if (!dragging || dragging === el) return;
+      const rect = el.getBoundingClientRect();
+      list.insertBefore(dragging, (e.clientY - rect.top) > rect.height / 2 ? el.nextSibling : el);
+    });
+  });
+}
+
+// Drag-to-reorder the configurable table headers (desktop). `ths` are the
+// draggable <th> (data-colkey); dropping recomputes the order and re-renders.
+function wireHeaderReorder(ths, { fields, onChange }) {
+  let dragKey = null;
+  ths.forEach((th) => {
+    th.setAttribute('draggable', 'true');
+    th.addEventListener('dragstart', (e) => {
+      dragKey = th.dataset.colkey; th.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragKey); } catch { /* ignore */ }
+    });
+    th.addEventListener('dragend', () => { th.classList.remove('dragging'); dragKey = null; });
+    th.addEventListener('dragover', (e) => { e.preventDefault(); th.classList.add('drop-target'); });
+    th.addEventListener('dragleave', () => th.classList.remove('drop-target'));
+    th.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      th.classList.remove('drop-target');
+      const toKey = th.dataset.colkey;
+      if (!dragKey || dragKey === toKey) return;
+      const rect = th.getBoundingClientRect();
+      onChange(reorderKeys(fields, dragKey, toKey, (e.clientX - rect.left) > rect.width / 2));
+    });
+  });
+}
+
+// Collection Ledger's "Fields ▾" popover (public viewers don't get SENSITIVE
+// fields). Delegates to the shared reorderable column panel.
+function buildFieldsPanel() {
+  buildColumnPanel($('#fieldsPanel'), {
+    fields: view.fields,
+    choices: ALL_FIELDS.filter((f) => canEditState || !SENSITIVE.has(f.key)),
+    defaults: DEFAULT_VIEW.fields,
+    onChange: (next) => { view.fields = next; saveView(); render(); },
   });
 }
 
@@ -1748,11 +1856,29 @@ function wireSaleNotesSave() {
 // ---- Seller tools (owner-only: bulk actions, sort/filter/views, listing text) ----
 // Independent of the Collection tab's `filters`/`selectMode` so browsing one
 // page never disturbs the other's state.
+// The For Sale table's own configurable, reorderable columns (independent of
+// the Collection Ledger's view.fields). Brand/Model are the pinned identity
+// columns and Copy is a fixed trailing action, so these are the middle columns.
+const SALE_DEFAULT_FIELDS = ['sale_status', 'sale_price', 'days_listed', 'condition', 'percent_off'];
 let saleView = loadSaleView();
 function loadSaleView() {
-  const defaults = { mode: 'tile', sort: 'listed', sortDir: 'desc', status: '', q: '' };
-  try { return { ...defaults, ...JSON.parse(localStorage.getItem('yoyoSaleView') || '{}') }; }
-  catch { return defaults; }
+  const defaults = { mode: 'tile', sort: 'days_listed', sortDir: 'desc', status: '', q: '', fields: SALE_DEFAULT_FIELDS.slice() };
+  try {
+    const v = { ...defaults, ...JSON.parse(localStorage.getItem('yoyoSaleView') || '{}') };
+    if (!Array.isArray(v.fields) || !v.fields.length) v.fields = SALE_DEFAULT_FIELDS.slice();
+    if (v.sort === 'listed') v.sort = 'days_listed';   // migrate legacy sort keys
+    if (v.sort === 'price') v.sort = 'sale_price';
+    return v;
+  } catch { return defaults; }
+}
+// Choices for the For Sale column picker: the full field registry plus a
+// synthetic "Days listed" column (computed, not a stored field).
+function saleFieldChoices() {
+  return [{ key: 'days_listed', label: 'Days listed', num: true, synthetic: true }, ...ALL_FIELDS];
+}
+function saleColumns() {
+  const byKey = Object.fromEntries(saleFieldChoices().map((c) => [c.key, c]));
+  return saleView.fields.map((k) => byKey[k]).filter(Boolean);
 }
 function saveSaleView() { try { localStorage.setItem('yoyoSaleView', JSON.stringify(saleView)); } catch { /* ignore */ } }
 let saleSelectMode = false;
@@ -1774,14 +1900,13 @@ function saleFilteredSorted() {
   if (q) list = list.filter((y) => [y.brand, y.model, y.color, y.composition].join(' ').toLowerCase().includes(q));
   if (saleView.status) list = list.filter((y) => y.sale_status === saleView.status);
   const flip = saleView.sortDir === 'desc' ? -1 : 1;
+  const key = saleView.sort;
+  const numeric = key === 'days_listed' || FIELD_BY_KEY[key]?.num || NUMERIC_KEYS.has(key);
+  const cellVal = (y) => (key === 'days_listed' ? daysListed(y) : valueOf(y, key));
   list.sort((a, b) => {
     let r;
-    switch (saleView.sort) {
-      case 'price': r = (a.sale_price ?? -1) - (b.sale_price ?? -1); break;
-      case 'listed': r = (daysListed(a) ?? -1) - (daysListed(b) ?? -1); break;
-      case 'model': r = String(a.model || '').localeCompare(String(b.model || '')); break;
-      default: r = String(a.brand || '').localeCompare(String(b.brand || ''));
-    }
+    if (numeric) r = (cellVal(a) ?? -Infinity) - (cellVal(b) ?? -Infinity);
+    else r = String(cellVal(a) ?? '').localeCompare(String(cellVal(b) ?? ''));
     if (r === 0) r = String(a.brand || '').localeCompare(String(b.brand || ''));
     return r * flip;
   });
@@ -1887,29 +2012,49 @@ function ownerSaleRowsHTML(items) {
   }).join('');
   return `<div class="sale-rows">${rows}</div>`;
 }
+// One <td> for a configurable For Sale column. sale_status/sale_price stay
+// inline-editable (the seller's quick-edit workflow); days_listed is the
+// computed stale-aware badge; everything else is the standard read-only cell.
+function saleCellHTML(y, c) {
+  if (c.key === 'days_listed') {
+    const d = daysListed(y);
+    const stale = d != null && d >= STALE_DAYS;
+    return `<td class="num${stale ? ' stale' : ''}" ${stale ? `title="Listed ${d} days — stale"` : ''}>${d != null ? `${stale ? '⚠ ' : ''}${d}d` : '—'}</td>`;
+  }
+  if (c.key === 'sale_status') return `<td class="sale-editable" data-edit="sale_status">${esc(y.sale_status)}</td>`;
+  if (c.key === 'sale_price') return `<td class="num sale-editable" data-edit="sale_price">${y.sale_price != null ? money(y.sale_price) : '—'}</td>`;
+  return `<td class="${c.num ? 'num' : ''}">${esc(fmtField(c.key, valueOf(y, c.key)))}</td>`;
+}
 function ownerSaleTableHTML(items) {
+  const cols = saleColumns();
   const arrow = (key) => (saleView.sort === key ? (saleView.sortDir === 'asc' ? ' ▲' : ' ▼') : '');
   const th = (key, label, extra = '') => `<th class="sortable ${extra} ${saleView.sort === key ? 'sorted' : ''}" data-sale-sort="${key}">${esc(label)}${arrow(key)}</th>`;
+  const thCol = (c) => `<th class="sortable col-th ${c.num ? 'num' : ''} ${saleView.sort === c.key ? 'sorted' : ''}" data-sale-sort="${c.key}" data-colkey="${c.key}">${esc(c.label)}${arrow(c.key)}</th>`;
   const head = '<th class="col-sel"></th>' +
     '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') +
-    '<th>Status</th>' + th('price', 'Price', 'num') + th('listed', 'Days listed', 'num') + '<th></th>';
+    cols.map(thCol).join('') + '<th></th>';
   const rows = items.map((y) => {
     const thumb = y.photos[0]
       ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
       : '<span class="row-thumb placeholder"></span>';
     const selCell = `<td class="col-sel">${saleSelBoxHTML(y)}</td>`;
-    const d = daysListed(y);
-    const staleT = d != null && d >= STALE_DAYS;
     return `<tr data-id="${y.id}" class="${saleSelectedIds.has(y.id) ? 'selected' : ''}">
         ${selCell}<td class="col-photo">${thumb}</td>
         <td>${esc(y.brand)}</td><td>${esc(y.model)}</td>
-        <td class="sale-editable" data-edit="sale_status">${esc(y.sale_status)}</td>
-        <td class="num sale-editable" data-edit="sale_price">${y.sale_price != null ? money(y.sale_price) : '—'}</td>
-        <td class="num${staleT ? ' stale' : ''}" ${staleT ? `title="Listed ${d} days — stale"` : ''}>${d != null ? `${staleT ? '⚠ ' : ''}${d}d` : '—'}</td>
+        ${cols.map((c) => saleCellHTML(y, c)).join('')}
         <td><button type="button" class="btn btn-ghost btn-sm sale-copy-btn" data-copy="${y.id}">Copy</button></td>
       </tr>`;
   }).join('');
   return `<div class="table-wrap"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+// The For Sale column picker (reuses the shared reorderable panel).
+function buildSaleFieldsPanel() {
+  buildColumnPanel($('#saleFieldsPanel'), {
+    fields: saleView.fields,
+    choices: saleFieldChoices(),
+    defaults: SALE_DEFAULT_FIELDS,
+    onChange: (next) => { saleView.fields = next; saveSaleView(); renderSaleBody(); },
+  });
 }
 
 function setSaleSelectMode(on) {
@@ -2074,6 +2219,9 @@ function syncSaleControls() {
   $('#saleSortDir').textContent = saleView.sortDir === 'asc' ? '↑' : '↓';
   document.querySelectorAll('#saleViewSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.saleView === saleView.mode));
   $('#saleSelectBtn').classList.toggle('active', saleSelectMode);
+  // The column picker only applies to the Table view (like the Ledger's).
+  $('#saleFieldsMenu').classList.toggle('hidden', saleView.mode !== 'table');
+  if (saleView.mode === 'table') buildSaleFieldsPanel();
 }
 // Re-renders just the stats + item list + selection bar (never the toolbar
 // itself) — the function every seller-tools interaction calls.
@@ -2143,6 +2291,14 @@ function renderSaleBody() {
     else { saleView.sort = key; saleView.sortDir = 'asc'; }
     saveSaleView(); syncSaleControls(); renderSaleBody();
   }));
+  // Drag a configurable header to reorder the sale table's columns (desktop);
+  // the Fields ▾ picker covers touch. Brand/Model stay pinned.
+  if (saleView.mode === 'table') {
+    wireHeaderReorder([...body.querySelectorAll('th.col-th')], {
+      fields: saleView.fields,
+      onChange: (next) => { saleView.fields = next; saveSaleView(); renderSaleBody(); },
+    });
+  }
   renderSaleSelectionBar();
 }
 // One-time wiring for the persistent toolbar controls (mirrors the top-level
@@ -3649,6 +3805,15 @@ $('#fieldsBtn').addEventListener('click', (e) => {
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.fields-menu')) $('#fieldsPanel').classList.add('hidden');
+});
+// For Sale column picker (same behavior as the Collection Ledger's).
+$('#saleFieldsBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('#saleFieldsPanel').classList.toggle('hidden');
+  $('#saleFieldsBtn').setAttribute('aria-expanded', String(!open));
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#saleFieldsMenu')) $('#saleFieldsPanel').classList.add('hidden');
 });
 
 $('#addBtn').addEventListener('click', () => openAdd());

@@ -394,6 +394,25 @@ input:focus, textarea:focus, .select:focus, .search:focus { border-color: var(--
 .popover-foot { border-top: 1px solid var(--separator); margin-top: 4px; padding-top: 5px; display: flex; justify-content: flex-end; }
 .link-btn { background: none; border: none; color: var(--accent); font-size: 0.8rem; cursor: pointer; }
 .popover-menu { right: 0; min-width: 184px; }
+
+/* Reorderable columns popover (Collection Ledger + For Sale table) */
+.col-order { display: flex; flex-direction: column; gap: 2px; padding: 2px; }
+.col-item { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; font-size: 0.83rem; background: var(--surface); border: 1px solid transparent; cursor: grab; }
+.col-item:hover { background: var(--hover); }
+.col-item.dragging { opacity: 0.4; }
+.col-grip { display: inline-flex; width: 14px; color: var(--muted); flex: none; }
+.col-grip svg { width: 14px; height: 14px; }
+.col-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-move { flex: none; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); background: var(--content-bg); border-radius: 5px; color: var(--text); cursor: pointer; line-height: 1; font-size: 0.8rem; }
+.col-move:disabled { opacity: 0.3; cursor: default; }
+.col-remove { flex: none; width: 22px; height: 22px; padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; border-radius: 5px; font-size: 0.85rem; }
+.col-remove:hover { background: var(--hover); color: var(--danger, var(--accent)); }
+.col-add { display: flex; flex-direction: column; gap: 2px; padding: 2px; }
+.col-addbtn { border: none; background: transparent; text-align: left; color: var(--text); }
+/* A header being dragged / a drop target during column reorder */
+.data-table th.col-th { cursor: grab; }
+.data-table th.col-th.dragging { opacity: 0.45; }
+.data-table th.col-th.drop-target { box-shadow: inset 2px 0 0 var(--accent); }
 .pop-action { display: block; width: 100%; text-align: left; padding: 7px 10px; border: none; background: transparent; color: var(--text); font-size: 0.84rem; border-radius: 5px; cursor: pointer; text-decoration: none; }
 .pop-action:hover { background: var(--accent); color: var(--on-accent); }
 .pop-sep { height: 1px; background: var(--separator); margin: 4px 6px; }

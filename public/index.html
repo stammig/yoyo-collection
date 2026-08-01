@@ -185,13 +185,17 @@
               <option value="For Sale or Trade">For Sale or Trade</option>
             </select>
             <select id="saleSort" class="select select-sm" aria-label="Sort by">
-              <option value="listed">Days listed</option>
-              <option value="price">Price</option>
+              <option value="days_listed">Days listed</option>
+              <option value="sale_price">Price</option>
               <option value="brand">Brand</option>
               <option value="model">Model</option>
             </select>
             <button type="button" id="saleSortDir" class="btn btn-ghost btn-sm" title="Toggle sort direction">↓</button>
             <span class="spacer"></span>
+            <div class="fields-menu hidden" id="saleFieldsMenu">
+              <button id="saleFieldsBtn" class="btn btn-ghost" aria-expanded="false">Fields ▾</button>
+              <div id="saleFieldsPanel" class="popover hidden"></div>
+            </div>
             <div class="seg" id="saleViewSeg" role="group" aria-label="Sale view mode">
               <button type="button" class="seg-btn" data-sale-view="tile">Grid</button>
               <button type="button" class="seg-btn" data-sale-view="row">List</button>
