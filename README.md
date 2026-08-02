@@ -49,19 +49,47 @@ anything.
 
 ## Quick start
 
-### With Docker (easiest)
+### One-line install (easiest)
+Requires [Docker](https://docs.docker.com/get-docker/). Copy-paste into a
+terminal (macOS / Linux):
 ```bash
+curl -fsSL https://raw.githubusercontent.com/stammig/yoyo-collection/main/install.sh | bash
+```
+It creates `~/yoyo-collection`, pulls the prebuilt image, optionally asks for an
+owner password, and starts the app. Open **http://localhost:3000**. Re-run the
+same command any time to update — your data is untouched.
+
+<details>
+<summary>Options (install to a different folder, port, or set a password up front)</summary>
+
+```bash
+# Install to /opt/yoyo, serve on port 8080, set the owner password without a prompt:
+curl -fsSL https://raw.githubusercontent.com/stammig/yoyo-collection/main/install.sh \
+  | YOYO_DIR=/opt/yoyo YOYO_PORT=8080 ADMIN_PASSWORD='super-secret' bash
+```
+`YOYO_DIR`, `YOYO_PORT`, `YOYO_IMAGE` (pin a version tag), and `ADMIN_PASSWORD`
+are all honored.
+</details>
+
+### With Docker Compose (any OS, incl. Windows)
+Grab the compose file and start the prebuilt image — no cloning, no building:
+```bash
+mkdir yoyo-collection && cd yoyo-collection
+curl -fsSL https://raw.githubusercontent.com/stammig/yoyo-collection/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 Open http://localhost:3000. Your data lives in the `yoyo-data` volume and
-survives rebuilds.
+survives restarts and updates. Update with `docker compose pull && docker compose up -d`.
 
-### With Node
+### With Node (from source)
 ```bash
 npm install
 npm start          # or: npm run dev  (auto-restarts on changes)
 ```
 Open http://localhost:3000.
+
+> **Build the Docker image from source** (instead of pulling it):
+> `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
 
 ## Configuration
 All settings are environment variables and **all are optional** — with none set,
@@ -116,7 +144,8 @@ It refuses to overwrite a database that already has yoyos unless you pass
 ## Deploying
 It's a standard Node web server, so it runs on most hosts (Docker, Render,
 Railway, Fly.io, a VPS, shared cPanel/Passenger hosting, etc.):
-1. Start command: `npm start` (or run the Docker image).
+1. Start command: `npm start` (or run the Docker image
+   `ghcr.io/stammig/yoyo-collection:latest`, multi-arch amd64 + arm64).
 2. `PORT` is read from the environment (already handled).
 3. Give `data/` and `uploads/` a **persistent volume**, or point `DB_PATH` and
    `UPLOAD_DIR` at one.

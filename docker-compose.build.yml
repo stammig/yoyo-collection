@@ -1,0 +1,10 @@
+# Build the image from source instead of pulling the published one from GHCR.
+# Use this as an override on top of docker-compose.yml:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Handy when developing locally or running on an air-gapped machine. Everything
+# else (ports, volume, env) is inherited from docker-compose.yml.
+services:
+  yoyo:
+    build: .

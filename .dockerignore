@@ -11,3 +11,8 @@ fill-specs.*
 README.md
 DEPLOY*.md
 CONTRIBUTING.md
+CHANGELOG.md
+.github
+docker-compose*.yml
+install.sh
+.env.example

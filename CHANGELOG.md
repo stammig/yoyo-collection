@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-01
+- **One-line install + prebuilt Docker image** — a new `install.sh` lets anyone
+  set the app up with a single command
+  (`curl -fsSL .../install.sh | bash`): it checks for Docker, creates an install
+  folder, optionally prompts for an owner password (stored in `.env`, passed to
+  the container verbatim via `env_file`), pulls the image, and starts on
+  :3000 — and re-running it updates in place. A GitHub Actions workflow
+  (`.github/workflows/docker-publish.yml`) publishes a multi-arch (amd64 +
+  arm64) image to `ghcr.io/stammig/yoyo-collection` on every push to `main` and
+  version tag. `docker-compose.yml` now pulls that prebuilt image (no build
+  step); `docker-compose.build.yml` is the override for building from source.
+- **Fix: Ledger "Listed" status filter ignored by the filter controls** —
+  selecting **Listed** filtered the collection but left the "Clear all" button
+  hidden, the filter badge at 0, and no removable chip, and "Clear all filters"
+  never reset it (the collection stayed silently filtered to for-sale items).
+  `filters.listed` is now wired into `filtersActive`, `activeFilterCount`,
+  `renderActiveFilters`, and `clearAllFilters`.
+
 ## 2026-07-27 (2)
 - **New Gallery view — a wall of your yoyo photos** — a dedicated sidebar
   section (`data-view="gallery"`) that lays every photographed yoyo out as a

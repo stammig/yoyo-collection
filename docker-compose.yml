@@ -1,8 +1,18 @@
-# Run the whole app with one command:  docker compose up -d
-# Then open http://localhost:3000  (data persists in the "yoyo-data" volume).
+# Run Yoyo Collection with one command — no cloning, no building:
+#
+#     docker compose up -d
+#
+# Then open http://localhost:3000.  Your data (database + photos) lives in the
+# "yoyo-data" volume and survives restarts and image updates.
+#
+# Update to the latest version any time with:
+#     docker compose pull && docker compose up -d
+#
+# Prefer to build the image from source instead of pulling it? See
+# docker-compose.build.yml.
 services:
   yoyo:
-    build: .
+    image: ghcr.io/stammig/yoyo-collection:latest
     ports:
       - "3000:3000"
     volumes:
@@ -10,10 +20,12 @@ services:
     environment:
       DB_PATH: /data/yoyos.db
       UPLOAD_DIR: /data/uploads
-      # Uncomment to require a login for editing (public stays read-only):
+      # Owner login: set a password so the public view is read-only and you log
+      # in to edit. Leave unset to run fully open (anyone can edit).
       # ADMIN_PASSWORD: change-me
-      # Optional features — see .env.example for the full list:
-      # ANTHROPIC_API_KEY: sk-ant-...
+      #
+      # More options — private mode, request throttling, carrier ETA lookups —
+      # are listed in .env.example.
     restart: unless-stopped
 
 volumes:
