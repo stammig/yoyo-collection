@@ -115,8 +115,13 @@ const FRAME_ANCESTORS = process.env.FRAME_ANCESTORS; // e.g. "https://yoursite.c
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const LOGIN_ENABLED = !!ADMIN_PASSWORD;
 
+// Derive the token-signing key from the admin password with scrypt (a slow KDF)
+// rather than a fast hash: it's computed once at startup, but it means a captured
+// session token can't be used for a cheap offline dictionary attack on the
+// password. Deterministic (fixed salt) so tokens survive restarts. Set
+// SESSION_SECRET explicitly to bypass this entirely.
 const SESSION_SECRET = process.env.SESSION_SECRET
-  || crypto.createHash('sha256').update(`yoyo-session:${ADMIN_PASSWORD}`).digest('hex');
+  || crypto.scryptSync(ADMIN_PASSWORD, 'yoyo-session', 32).toString('hex');
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 // Signed, stateless session token: base64url(JSON payload) + "." + HMAC signature.
@@ -419,7 +424,14 @@ function loadFieldDefs() {
 // Turns a user-typed label ("Wax Finish?") into a safe column-ish key
 // ("wax_finish") for storing inside the `custom` JSON blob.
 function slugify(label) {
-  return String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'field';
+  // Bound the input first so a pathologically long label can't cause a
+  // super-linear regex, then collapse non-alphanumerics and trim underscores
+  // with a plain loop (no backtracking-prone anchored regex).
+  const s = String(label).slice(0, 80).toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  let a = 0, b = s.length;
+  while (a < b && s[a] === '_') a++;
+  while (b > a && s[b - 1] === '_') b--;
+  return s.slice(a, b).slice(0, 40) || 'field';
 }
 
 // Disambiguates a slugified key against both the built-in columns and any
@@ -817,7 +829,9 @@ app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
   if (!req.file) return res.status(400).json({ error: 'No photo uploaded.' });
   const yoyo = db.prepare('SELECT id FROM yoyos WHERE uuid = ? AND deleted_at IS NULL').get(req.params.yoyoUuid);
   if (!yoyo) {
-    fs.rmSync(req.file.path, { force: true });
+    // basename() keeps this strictly inside UPLOAD_DIR even though the filename
+    // is already a validated uuid (see the UUID_RE guard above).
+    fs.rmSync(path.join(UPLOAD_DIR, path.basename(req.file.filename)), { force: true });
     return res.status(404).json({ error: 'Yoyo not found.' });
   }
 

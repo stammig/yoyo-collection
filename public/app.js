@@ -2383,11 +2383,12 @@ function saleDialog(titleHTML, bodyHTML, onApply) {
   card.className = 'modal-card modal-sm';
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', String(titleHTML).replace(/<[^>]*>/g, ''));
   card.innerHTML =
     `<div class="modal-head"><h2>${titleHTML}</h2></div>` +
     `<div class="form"><div class="form-section">${bodyHTML}</div></div>` +
     `<div class="modal-foot"><span class="spacer"></span><button type="button" class="btn btn-ghost" data-act="cancel">Cancel</button><button type="button" class="btn btn-primary" data-act="apply">Apply</button></div>`;
+  // Accessible name from the rendered heading's text (no regex tag-stripping).
+  card.setAttribute('aria-label', card.querySelector('.modal-head h2')?.textContent || '');
   const bd = document.createElement('div'); bd.className = 'modal-backdrop';
   overlay.appendChild(bd); overlay.appendChild(card); document.body.appendChild(overlay);
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
@@ -2888,7 +2889,9 @@ function wireGalleryBar() {
   });
   const size = $('#galSize');
   if (size) size.addEventListener('change', () => {
-    gallerySize = size.value;
+    // Coerce to the known set so the value can never be anything but sm/md/lg
+    // when it's interpolated into markup (data-size).
+    gallerySize = ['sm', 'md', 'lg'].includes(size.value) ? size.value : 'md';
     const g = $('#viewGallery .gallery-grid'); if (g) g.setAttribute('data-size', gallerySize);
   });
 }

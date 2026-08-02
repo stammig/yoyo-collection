@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-02 (2)
+- **Security hardening (from CodeQL code scanning)** —
+  - Session-token signing key is now derived from `ADMIN_PASSWORD` with **scrypt**
+    (a slow KDF) instead of SHA-256, so a captured token can't be used for a cheap
+    offline dictionary attack on the password. Deterministic across restarts;
+    `SESSION_SECRET` still overrides. (Existing sessions re-authenticate once.)
+  - `slugify()` no longer uses a backtracking-prone trim regex on owner-supplied
+    field labels and bounds input length — removes a potential ReDoS.
+  - Sync photo cleanup path now goes through `path.basename` (defense-in-depth
+    alongside the existing uuid validation).
+  - Gallery size is coerced to the known `sm/md/lg` set before it reaches markup;
+    the sale dialog's accessible name is taken from rendered text rather than a
+    regex tag-strip.
+
 ## 2026-08-02
 - **Settings → Version & updates** — the app now shows the version it's running
   and a **Check for updates** button that compares it against the latest GitHub
