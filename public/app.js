@@ -649,7 +649,11 @@ function shelfHeroHTML(y) {
   </section>`;
 }
 function shelfSub(y) {
-  if (!y.in_hand) return { cls: 'state', text: 'on order' };
+  // "On order" is owner-only logistics — the server strips in_hand from public
+  // responses, so only owners (canEditState) ever see this state. For public
+  // viewers we fall through to the sale status / colorway instead of wrongly
+  // flagging everything "on order".
+  if (canEditState && !y.in_hand) return { cls: 'state', text: 'on order' };
   if (isForSale(y.sale_status)) return { cls: 'state', text: y.sale_status };
   if (y.sale_status === 'Sold') return { cls: 'muted', text: 'sold' };
   return { cls: 'muted', text: y.color || '' };
