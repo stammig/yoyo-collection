@@ -1040,10 +1040,10 @@ body.read-only .card-actions { display: none; }
 .tag-sale { background: var(--green); color: #fff; border-color: transparent; font-weight: 600; }
 .tag-sold { background: var(--surface-3); color: var(--muted); border-color: transparent; font-weight: 600; }
 
-.sale-notes { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin: 0 0 16px; font-size: 0.86rem; color: var(--text); line-height: 1.5; }
-.sale-notes-edit { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin: 0 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.sale-notes { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 16px; max-width: 720px; font-size: 0.86rem; color: var(--text); line-height: 1.5; }
+.sale-notes-edit { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin: 0 0 16px; max-width: 720px; display: flex; flex-direction: column; gap: 8px; }
 .sale-notes-edit label { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-.sale-notes-edit textarea { width: 100%; resize: vertical; }
+.sale-notes-edit textarea { width: 100%; resize: vertical; min-height: 76px; }
 .sale-intro { font-size: 0.85rem; color: var(--muted); margin: 0 0 16px; }
 .sale-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
 .sale-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; cursor: pointer; transition: border-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease; }
