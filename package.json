@@ -1,6 +1,6 @@
 {
   "name": "yoyo-collection",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A self-hosted web app to catalog and showcase your yoyo collection.",
   "type": "module",
   "main": "server.js",
