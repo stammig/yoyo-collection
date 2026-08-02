@@ -28,6 +28,31 @@ catch (e) { console.warn('sharp unavailable — thumbnails disabled, serving ful
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 
+// App version (from package.json) + how this instance is running — surfaced in
+// Settings → Version & updates so the owner can see they're current and get the
+// right update command for their setup.
+let APP_VERSION = '0.0.0';
+try { APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || APP_VERSION; }
+catch { /* keep default */ }
+// Inside a container the app can't restart itself; we just show the command.
+const IN_DOCKER = fs.existsSync('/.dockerenv');
+// Which GitHub repo to check for releases (overridable so forks work).
+const UPDATE_REPO = process.env.UPDATE_REPO || 'stammig/yoyo-collection';
+// The copy-paste command shown when an update is available. Overridable for
+// non-standard setups; otherwise inferred from whether we're in Docker.
+function updateCommand() {
+  if (process.env.UPDATE_HINT) return process.env.UPDATE_HINT;
+  if (IN_DOCKER) return 'docker compose pull && docker compose up -d';
+  return 'git pull && npm install && npm start';
+}
+// Compare dotted versions (ignoring any leading "v"): -1 / 0 / 1.
+function cmpVersion(a, b) {
+  const pa = String(a || '').replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0) ? -1 : 1; }
+  return 0;
+}
+
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -821,7 +846,54 @@ app.get('/api/config', (req, res) => res.json({
   loggedIn: isLoggedIn(req),
   trackingEnabled: Object.values(configuredCarriers(process.env)).some(Boolean),
   demoMode: DEMO_MODE,
+  version: APP_VERSION,
 }));
+
+// ---- API: update check ----
+// Compares this instance's version against the latest GitHub release and, when
+// behind, returns the copy-paste command to update. Owner-only (it makes an
+// outbound call) and cached briefly so repeated clicks don't hammer GitHub's
+// unauthenticated rate limit. The app never updates itself — a containerized
+// process can't safely restart into a new image — so this is advisory only.
+let updateCache = { at: 0, data: null };
+app.get('/api/check-update', async (req, res) => {
+  if (!canEdit(req)) return res.status(403).json({ error: 'Log in to check for updates.' });
+  const base = { current: APP_VERSION, runtime: IN_DOCKER ? 'docker' : 'node', updateCommand: updateCommand(), repo: UPDATE_REPO };
+
+  const now = Date.now();
+  if (updateCache.data && now - updateCache.at < 5 * 60 * 1000) {
+    return res.json({ ...updateCache.data, cached: true });
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    let r;
+    try {
+      r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': `yoyo-collection/${APP_VERSION}` },
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(timer); }
+    if (!r.ok) throw new Error(`GitHub returned ${r.status}`);
+    const j = await r.json();
+    const latest = String(j.tag_name || '').replace(/^v/, '');
+    const data = {
+      ...base,
+      latest,
+      updateAvailable: latest ? cmpVersion(APP_VERSION, latest) < 0 : false,
+      releaseUrl: j.html_url || `https://github.com/${UPDATE_REPO}/releases`,
+      releaseName: j.name || null,
+      publishedAt: j.published_at || null,
+    };
+    updateCache = { at: now, data };
+    res.json(data);
+  } catch (err) {
+    // Soft failure (offline, rate-limited, timeout): still a 200 so the client
+    // can show a friendly "couldn't check" without treating it as a hard error.
+    res.json({ ...base, error: err.name === 'AbortError' ? 'The update check timed out.' : (err.message || 'Update check failed.') });
+  }
+});
 
 // ---- API: site settings (key/value; e.g. For Sale shipping notes) ----
 // Only these keys are readable/writable through the API.

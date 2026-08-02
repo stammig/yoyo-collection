@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-02
+- **Settings → Version & updates** — the app now shows the version it's running
+  and a **Check for updates** button that compares it against the latest GitHub
+  release (`GET /api/check-update`, owner-only, cached 5 min, soft-fails when
+  offline). When a newer release exists it shows the new version, a release-notes
+  link, and the exact copy-paste update command for how this instance is running
+  — `docker compose pull && docker compose up -d` inside a container, otherwise
+  `git pull && npm install && npm start` (both overridable via `UPDATE_HINT`;
+  `UPDATE_REPO` lets forks point at their own repo). The app never updates
+  itself — a containerized process can't safely restart into a new image — so
+  this is advisory. `GET /api/config` now also returns `version`.
+
 ## 2026-08-01
 - **One-line install + prebuilt Docker image** — a new `install.sh` lets anyone
   set the app up with a single command

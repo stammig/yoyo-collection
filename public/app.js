@@ -4304,6 +4304,7 @@ async function loadConfig() {
   canEditState = !!c.canEdit;
   trackingEnabledState = !!c.trackingEnabled;
   demoModeState = !!c.demoMode;
+  if (c.version) { const v = $('#appVersion'); if (v) v.textContent = 'v' + c.version; }
   renderDemoBanner(!!c.loggedIn);
   document.body.classList.toggle('read-only', !c.canEdit);
   $('#loginBtn').classList.toggle('hidden', !c.loginEnabled || c.loggedIn);
@@ -4428,6 +4429,48 @@ $('#settingsBtn').addEventListener('click', () => {
 });
 
 function closeSettings() { $('#settingsModal').classList.add('hidden'); }
+
+// Check GitHub for a newer release. The app never updates itself (a container
+// can't safely restart into a new image) — on a hit we show the exact command
+// for this instance's setup, with a copy button.
+$('#checkUpdateBtn')?.addEventListener('click', async () => {
+  const btn = $('#checkUpdateBtn');
+  const status = $('#updateStatus');
+  btn.disabled = true;
+  status.className = 'status-banner';
+  status.classList.remove('hidden');
+  status.textContent = 'Checking for updates…';
+  try {
+    const r = await api('/api/check-update');
+    const cur = 'v' + (r.current || '?');
+    if (r.error) {
+      status.className = 'status-banner warn';
+      status.textContent = `Couldn't check right now (${r.error}) You're on ${cur}.`;
+    } else if (r.updateAvailable) {
+      const cmd = r.updateCommand || '';
+      status.className = 'status-banner';
+      status.innerHTML =
+        `<div class="update-head"><strong>Update available: v${esc(r.latest)}</strong>` +
+        ` <span class="update-cur">you're on ${esc(cur)}</span></div>` +
+        (r.releaseUrl ? `<a href="${esc(r.releaseUrl)}" target="_blank" rel="noopener" class="update-notes">Release notes ↗</a>` : '') +
+        (cmd ? `<div class="update-cmd"><code id="updateCmd">${esc(cmd)}</code>` +
+          `<button type="button" class="btn btn-ghost btn-sm" id="copyUpdateCmd">Copy</button></div>` +
+          `<p class="hint">Run it where this app is installed, then reload.</p>` : '');
+      $('#copyUpdateCmd')?.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(cmd); toast('Command copied.', 'ok'); }
+        catch { toast('Could not copy — select and copy it manually.', 'error'); }
+      });
+    } else {
+      status.className = 'status-banner ok';
+      status.textContent = `You're up to date (${cur}).`;
+    }
+  } catch (err) {
+    status.className = 'status-banner warn';
+    status.textContent = 'Failed: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // Generate thumbnails for existing photos (one-time, cuts image bandwidth).
 $('#optimizePhotosBtn').addEventListener('click', async () => {

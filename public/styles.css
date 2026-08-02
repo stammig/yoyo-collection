@@ -943,6 +943,15 @@ body.read-only .card-actions { display: none; }
 .status-banner { margin: 10px 22px 0; padding: 10px 13px; border-radius: var(--radius); font-size: 0.82rem; background: var(--surface-2); color: var(--muted); }
 .status-banner.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
 .status-banner.warn { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold); }
+/* Update-available banner: version line, release-notes link, and the copy-able command. */
+.status-banner .update-head { color: var(--text); font-size: 0.9rem; }
+.status-banner .update-cur { color: var(--muted); font-weight: 400; }
+.status-banner .update-notes { display: inline-block; margin-top: 2px; color: var(--green); font-weight: 600; text-decoration: none; }
+.status-banner .update-notes:hover { text-decoration: underline; }
+.status-banner .update-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.status-banner .update-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 7px 10px; border-radius: 8px; background: var(--surface); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.status-banner .update-cmd .btn { flex: none; }
+.status-banner .hint { margin: 6px 0 0; }
 
 /* ============================================================
    Detail
