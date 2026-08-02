@@ -1,6 +1,6 @@
 {
   "name": "yoyo-collection",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A self-hosted web app to catalog and showcase your yoyo collection.",
   "type": "module",
   "main": "server.js",
@@ -31,7 +31,7 @@
     "node": "22.x"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "archiver": "^7.0.1",
     "csv-parse": "^5.6.0",
     "csv-stringify": "^6.5.2",

@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-02 (3)
+- **Dependency security updates (Dependabot)** — patched six advisories by
+  bumping: **multer** → 2.2.0 (DoS via deeply nested field names; incomplete
+  cleanup of aborted uploads), **adm-zip** → 0.6.0 (crafted-ZIP 4 GB allocation),
+  **brace-expansion** → 2.1.4 (two DoS) and **body-parser** → 1.20.6 (size-limit
+  bypass), both transitive. adm-zip 0.6 is a 0.x bump but its API is unchanged
+  for our use; verified with a full backup → restore roundtrip and a photo
+  upload. `npm audit` is clean (0 vulnerabilities).
+
 ## 2026-08-02 (2)
 - **Security hardening (from CodeQL code scanning)** —
   - Session-token signing key is now derived from `ADMIN_PASSWORD` with **scrypt**
