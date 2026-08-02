@@ -17,7 +17,7 @@ let yoyos = [];
 let filters = {
   q: '', sort: 'brand', sortDir: 'asc',
   brands: [], compositions: [], conditions: [],
-  material: '', status: '', retiredOnly: false, favOnly: false,
+  material: '', status: '', retiredOnly: false, listed: false, favOnly: false,
   paidMin: null, paidMax: null, retailMin: null, retailMax: null, weightMin: null, weightMax: null,
 };
 let editingId = null;
@@ -455,7 +455,7 @@ function setSort(key) {
 // ---- Master render ----
 function filtersActive() {
   return !!(filters.q || filters.brands.length || filters.compositions.length || filters.conditions.length ||
-    filters.material || filters.status || filters.retiredOnly || filters.favOnly ||
+    filters.material || filters.status || filters.retiredOnly || filters.listed || filters.favOnly ||
     filters.paidMin != null || filters.paidMax != null || filters.retailMin != null || filters.retailMax != null ||
     filters.weightMin != null || filters.weightMax != null);
 }
@@ -467,6 +467,7 @@ function activeFilterCount() {
   if (filters.material) n++;
   if (filters.status) n++;
   if (filters.retiredOnly) n++;
+  if (filters.listed) n++;
   if (filters.favOnly) n++;
   if (filters.paidMin != null || filters.paidMax != null) n++;
   if (filters.retailMin != null || filters.retailMax != null) n++;
@@ -4021,7 +4022,7 @@ wireSaleControlsOnce();
 function clearAllFilters() {
   filters.q = '';
   filters.brands = []; filters.compositions = []; filters.conditions = [];
-  filters.material = ''; filters.status = ''; filters.retiredOnly = false; filters.favOnly = false;
+  filters.material = ''; filters.status = ''; filters.retiredOnly = false; filters.listed = false; filters.favOnly = false;
   filters.paidMin = filters.paidMax = filters.retailMin = filters.retailMax = filters.weightMin = filters.weightMax = null;
   $('#search').value = '';
   view.page = 1;
@@ -4130,6 +4131,7 @@ function renderActiveFilters() {
   if (filters.status === 'in') add('In hand', () => { filters.status = ''; });
   if (filters.status === 'order') add('On order', () => { filters.status = ''; });
   if (filters.retiredOnly) add('Retired', () => { filters.retiredOnly = false; });
+  if (filters.listed) add('Listed', () => { filters.listed = false; });
   if (filters.favOnly) add('Favorites', () => { filters.favOnly = false; });
   const rangeLabel = (name, min, max, fmt = (v) => v) =>
     min != null && max != null ? `${name} ${fmt(min)}–${fmt(max)}` : min != null ? `${name} ≥ ${fmt(min)}` : `${name} ≤ ${fmt(max)}`;
