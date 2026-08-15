@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-15
+- **Self-hosting deployment guides** — three new docs covering where to actually
+  run this, since "give `data/` and `uploads/` a persistent volume" was the only
+  guidance outside the cPanel walkthrough. [`DEPLOY-NAS.md`](DEPLOY-NAS.md) covers
+  NAS appliances and Linux servers (OpenMediaVault, Unraid, Synology, TrueNAS
+  SCALE, QNAP, plus generic Linux/Proxmox/Raspberry Pi/VPS);
+  [`DEPLOY-DESKTOP.md`](DEPLOY-DESKTOP.md) covers macOS and Windows;
+  [`REMOTE-ACCESS.md`](REMOTE-ACCESS.md) covers reaching an instance from outside
+  the LAN. Each is structured as shared setup first, then per-platform notes, so
+  the common material lives in one place.
+
+  The through-line is a storage rule the app depends on but never stated: **the
+  database must sit on a real local filesystem.** SQLite's locking assumes one,
+  so a union/FUSE layer (mergerfs, Unraid's `/mnt/user` shfs), a network share
+  (NFS/SMB), or a Docker Desktop bind mount on macOS/Windows can all break it —
+  and the failure is silent, because `journal_mode = WAL` is quietly ignored and
+  the `wal_checkpoint(TRUNCATE)` that makes `GET /api/backup.zip` trustworthy
+  becomes a no-op. On single-board computers the same reasoning rules out putting
+  the database on the microSD boot card. Docs only; no code changes.
+
 ## 2026-08-02 (3)
 - **Dependency security updates (Dependabot)** — patched six advisories by
   bumping: **multer** → 2.2.0 (DoS via deeply nested field names; incomplete

@@ -150,6 +150,34 @@ Railway, Fly.io, a VPS, shared cPanel/Passenger hosting, etc.):
 3. Give `data/` and `uploads/` a **persistent volume**, or point `DB_PATH` and
    `UPLOAD_DIR` at one.
 
+### On a NAS or Linux server — [DEPLOY-NAS.md](DEPLOY-NAS.md)
+The natural home for this app: a Docker container with one persistent local
+disk. One guide, with per-platform sections for **OpenMediaVault, Unraid,
+Synology, TrueNAS SCALE, QNAP**, and **generic Linux** (Proxmox, Raspberry Pi,
+a VPS).
+
+The rule that matters everywhere: **the database must live on a real local
+filesystem** — never a union/FUSE layer (mergerfs, Unraid's `/mnt/user`) or a
+network share (SMB/NFS). SQLite's locking assumes local disk, and the failure is
+silent.
+
+### On macOS or Windows — [DEPLOY-DESKTOP.md](DEPLOY-DESKTOP.md)
+Good for a personal catalog on the machine you use; a desktop OS sleeps and
+reboots, so it's a weaker fit as the household's always-on collection.
+
+That guide recommends running **natively rather than in Docker** — the reverse
+of the NAS advice. Docker Desktop reaches host files through a translation layer
+(VirtioFS on macOS, 9p/WSL2 on Windows), the same hazard as a union or network
+filesystem. Native puts the database directly on APFS or NTFS. If you do use
+Docker there, use a **named volume**, not a bind mount.
+
+### Reaching it from outside your network
+[REMOTE-ACCESS.md](REMOTE-ACCESS.md) covers getting to your collection from
+anywhere. Short version: a mesh VPN like Tailscale needs no app changes and
+exposes nothing to the internet, while genuinely publishing the app means
+setting `ADMIN_PASSWORD` and `RATE_LIMIT_MAX` first. Don't forward a router port.
+
+### Elsewhere
 A detailed cPanel/Passenger walkthrough is in
 [DEPLOY-NAMECHEAP.md](DEPLOY-NAMECHEAP.md), and general notes in
 [DEPLOY.md](DEPLOY.md).
