@@ -319,8 +319,9 @@ Handy if you want to script against it (subject to the access mode above):
 - `GET/POST /api/yoyos`, `GET/PUT/DELETE /api/yoyos/:id`
 - `POST /api/yoyos/:id/photos`, `DELETE /api/photos/:photoId`
   (deleting a spin removes the whole frame sequence)
-- `POST /api/yoyos/:id/spin` — multipart `frames` (2-180 images) **or**
-  `archive` (one `.zip` of them), producing one 360° spin
+- `POST /api/yoyos/:id/spin` — multipart `frames` (2-180 images, 5 MB each);
+  `POST /api/yoyos/:id/spin-archive` — one `.zip` of the sequence. Either
+  produces one 360° spin
 - `POST /api/yoyos/:id/video` — multipart `video` + `poster` (both required)
 - `POST /api/yoyos/:id/videos` — JSON `{ url, title? }`, attach a YouTube /
   Instagram link; `DELETE /api/videos/:videoId`

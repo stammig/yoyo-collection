@@ -11,6 +11,36 @@ changes app behavior gets an entry — newest first.
   puts the cursor in Color. Condition, photos, edition, serial number, and
   purchase, sale and shipping details start blank. The native apps have the
   same action.
+## 2026-08-19 (2)
+- **Review fixes to the media work below** (found by an adversarial review pass
+  before merge; each was reproduced first, then fixed):
+  - **Loose spin frames now enforce the 5 MB/frame cap.** Multer's `fileSize`
+    limit is per file across all of an uploader's fields, so the shared spin
+    uploader gave loose frames the *archive's* allowance — one request could
+    write up to 180 oversized files where the zip path refused at 5 MB. Frames
+    and archive are now separate endpoints (`/spin`, `/spin-archive`) with
+    separate uploaders, which also makes the frames+archive-together request
+    (whose loose files were silently orphaned) impossible by construction. The
+    archive allowance drops 300 MB → 100 MB — real turntable exports are tens of
+    MB, and adm-zip buffers the whole file in RAM.
+  - **A video transported by sync now gets its poster.** The sync bytes endpoint
+    accepts an optional `poster` part alongside video bytes (mirroring the web
+    upload route), the manifest keeps requesting a video's uuid until both files
+    exist, and until then list views serve a bundled placeholder still instead
+    of the permanent 404 tile they used to show. The bytes-first fallback INSERT
+    also stamps `kind` from the mimetype, so an .mp4 uploaded before its
+    manifest no longer becomes a "photo" rendered as a broken `<img>`.
+  - **`/api/sync/changes` now tells the truth about stills**: each photo entry
+    carries `still_url` (the image to render — a video's poster, the file
+    itself otherwise) and `thumb_url` only for files a thumbnail actually exists
+    for. It used to advertise `thumb-<video>.jpg` and a thumbnail for every spin
+    frame, none of which exist. An explicit manifest `kind` can now also correct
+    an existing row, while manifests from older clients (no `kind`) can no
+    longer flatten a video or spin back to a plain photo.
+  - **Rejected multipart uploads no longer leave files behind** — the error
+    handler removes whatever multer had already written when a later part
+    tripped a limit or filter.
+
 ## 2026-08-19
 - **Two fixes to the 360°/video media work below** —
   - `/api/sync/changes` was sending each photo without its `kind` or

@@ -4149,7 +4149,7 @@ async function uploadSpin(fileList) {
     fd.append('archive', zip);
     try {
       toast('Unpacking the sequence…');
-      const updated = await api(`/api/yoyos/${editingId}/spin`, { method: 'POST', body: fd });
+      const updated = await api(`/api/yoyos/${editingId}/spin-archive`, { method: 'POST', body: fd });
       renderPhotoStrip(updated.photos);
       updateHero();
       await loadAll();
