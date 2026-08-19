@@ -36,6 +36,11 @@ anything.
   unboxings) to a yoyo. They get their own section, and nothing loads from
   YouTube or Instagram until a visitor presses play. See
   [Linked videos](#linked-videos-youtube--instagram).
+- **360° spins and video** — show a throw off in motion: upload a numbered frame
+  sequence for a drag-to-rotate 360, or a short looping `.mp4`/`.webm`. Both sit
+  in the gallery alongside photos and can be made the cover. List views keep
+  showing a still, so the grid stays fast. No ffmpeg needed — see
+  [360° spins and video](#360-spins-and-video).
 - **For Sale page** — a public, shareable page for the throws you're selling or
   trading, with prices, status badges, and your own shipping/sale notes.
 - **Sharing** — share any single yoyo as its own link (it shows the photo and key
@@ -246,6 +251,53 @@ Instagram embeds only work for **public** posts and reels. Private or age-gated
 ones will show an empty frame, so every card also carries an "Open on Instagram"
 link as a fallback.
 
+## 360° spins and video
+Two ways to show a throw in motion, both added from the **Photos** section of
+the add/edit form. They sit in the gallery next to your photos — drag either one
+to the front to make it the cover.
+
+The server never decodes video, so there's **no ffmpeg to install** and nothing
+extra to run on a NAS or SBC.
+
+### 360° spin (drag to rotate)
+Shoot a full rotation on a turntable and export it as a **numbered image
+sequence**, then use **Add 360° spin** — either pick all the frames at once, or
+hand it a single **`.zip`** of them and the server unpacks it for you (frames in
+a subfolder are fine, so zipping the export folder just works). Frames are
+ordered numerically either way, so `spin_2.jpg` correctly lands before
+`spin_10.jpg`.
+
+- 24-72 frames is the usual range (36 is a good default — 10° per frame).
+- Export around 800-1200px; every frame is downloaded to rotate the spin.
+- Lock the camera and use a plain backdrop — rotate only the yoyo.
+- Drop the duplicate final frame; a full turn ends where it started, and keeping
+  both makes the loop stutter.
+
+If you have a video instead of frames, ffmpeg on your own machine will do it:
+```bash
+ffmpeg -i spin.mov -vf "fps=12,scale=1000:-2" -q:v 3 frames/spin_%03d.jpg
+```
+Rotate it by dragging, or with the ← / → keys when it has focus.
+
+### Looping video
+**Add video** takes a short `.mp4` or `.webm` (up to 50 MB). It autoplays,
+loops, and is muted — audio is never played. Your browser grabs the poster frame
+as it uploads, so list views draw a still rather than pulling the video.
+
+**H.264 in an .mp4** is the safe choice — it plays everywhere. A 5-second
+1080×1080 spin lands around 400-800 KB:
+```bash
+ffmpeg -i spin.mov -an -c:v libx264 -preset veryslow -crf 24 \
+  -pix_fmt yuv420p -vf "fps=30,scale=1080:-2" -movflags +faststart spin.mp4
+```
+`-an` drops the audio track, `-pix_fmt yuv420p` keeps Safari happy, and
+`+faststart` lets playback begin before the file finishes downloading.
+
+### Where motion plays
+Only the **detail view** and the **zoom lightbox** animate. Tiles, rows, For
+Sale, Arrivals and Insights all keep showing a still, so a big collection loads
+at exactly the speed it did before.
+
 ## CSV import / export
 Use **⤓ Export CSV** / **⤴ Import CSV** in the toolbar. Columns:
 ```
@@ -266,6 +318,10 @@ isn't a recognizable date, like `Spring 2024`, is kept exactly as typed.
 Handy if you want to script against it (subject to the access mode above):
 - `GET/POST /api/yoyos`, `GET/PUT/DELETE /api/yoyos/:id`
 - `POST /api/yoyos/:id/photos`, `DELETE /api/photos/:photoId`
+  (deleting a spin removes the whole frame sequence)
+- `POST /api/yoyos/:id/spin` — multipart `frames` (2-180 images) **or**
+  `archive` (one `.zip` of them), producing one 360° spin
+- `POST /api/yoyos/:id/video` — multipart `video` + `poster` (both required)
 - `POST /api/yoyos/:id/videos` — JSON `{ url, title? }`, attach a YouTube /
   Instagram link; `DELETE /api/videos/:videoId`
 - `POST /api/track` — carrier ETA look-up (needs carrier creds)

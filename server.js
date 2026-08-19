@@ -321,20 +321,45 @@ app.use((req, res, next) => {
 
 // ---- File uploads (photos) ----
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+// Looped videos are stored and served verbatim — the server never decodes them,
+// so no ffmpeg. The browser supplies the poster frame (see POST .../video).
+const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
+// A full turntable rotation is typically 24-72 frames; the cap is generous
+// enough for a 1-degree-per-frame sequence without letting one upload fill a disk.
+const MAX_SPIN_FRAMES = 180;
+const MAX_SPIN_FRAME_BYTES = 5 * 1024 * 1024;
+// Ceiling on what one archive may expand to, checked against the zip's declared
+// sizes before anything is written — a small zip can otherwise claim a very
+// large amount of disk.
+const MAX_SPIN_ARCHIVE_BYTES = 300 * 1024 * 1024;
+// Browsers disagree on the mimetype for .zip (Windows reports x-zip-compressed,
+// and some report nothing useful at all), so accept the spellings and let the
+// zip parser be the real arbiter of whether it's an archive.
+const ALLOWED_ARCHIVE_TYPES = new Set([
+  'application/zip', 'application/x-zip-compressed', 'application/x-zip', 'multipart/x-zip',
+  'application/octet-stream',
+]);
 // Stored filenames get their extension from this fixed table, keyed by the
 // already-validated mimetype — NOT from the client-supplied original filename.
 // The original filename is attacker-controlled and can contain arbitrary
 // characters (quotes, angle brackets, etc.); deriving the extension from it
 // would let a crafted upload name inject those characters into a filename
 // that later gets embedded in HTML (photo URLs are rendered client-side).
-const EXT_BY_MIME = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+const EXT_BY_MIME = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+  'video/mp4': '.mp4', 'video/webm': '.webm',
+};
+
+// Every stored upload gets a generated name; nothing client-supplied reaches
+// the filesystem. Shared with the spin-archive path so extracted frames are
+// named exactly like directly-uploaded ones.
+function tempName(ext) {
+  return `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = EXT_BY_MIME[file.mimetype] || '.jpg';
-    cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
-  },
+  filename: (_req, file, cb) => cb(null, tempName(EXT_BY_MIME[file.mimetype] || '.jpg')),
 });
 
 const upload = multer({
@@ -343,6 +368,39 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_IMAGE_TYPES.has(file.mimetype)) cb(null, true);
     else cb(new Error('Only image files are allowed (jpg, png, webp, gif).'));
+  },
+});
+
+// A 360 spin arrives as an already-extracted frame sequence, so the server
+// never has to decode anything. Frames are small (they're one object on a plain
+// backdrop) but there are a lot of them, hence the low per-file / high file cap.
+const uploadSpin = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+    filename: (_req, file, cb) => cb(null, file.fieldname === 'archive' ? tempName('.zip') : tempName(EXT_BY_MIME[file.mimetype] || '.jpg')),
+  }),
+  limits: { fileSize: MAX_SPIN_ARCHIVE_BYTES, files: MAX_SPIN_FRAMES },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.fieldname === 'archive'
+      ? ALLOWED_ARCHIVE_TYPES.has(file.mimetype)
+      : ALLOWED_IMAGE_TYPES.has(file.mimetype);
+    if (ok) cb(null, true);
+    else cb(new Error('A spin takes image frames, or one .zip of them.'));
+  },
+});
+
+// A looped video plus the poster frame the browser extracted from it. The
+// poster is what every existing <img> surface (grid, table, For Sale) renders,
+// so a video is never fetched just to draw a thumbnail.
+const uploadVideo = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024, files: 2 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.fieldname === 'poster'
+      ? ALLOWED_IMAGE_TYPES.has(file.mimetype)
+      : ALLOWED_VIDEO_TYPES.has(file.mimetype);
+    if (ok) cb(null, true);
+    else cb(new Error('Video must be .mp4 or .webm, and the poster an image.'));
   },
 });
 
@@ -470,6 +528,11 @@ function percentOff(y) {
 const THUMB_MAX = 480;
 function thumbName(filename) {
   return 'thumb-' + filename.replace(/\.[^.]+$/, '') + '.jpg';
+}
+// The still the browser extracted from a video, stored alongside it. Deriving
+// the name means a video row needs no second database row for its poster.
+function posterName(filename) {
+  return 'poster-' + filename.replace(/\.[^.]+$/, '') + '.jpg';
 }
 async function makeThumb(filename) {
   if (!sharp) return; // image processing unavailable — frontend falls back to full image
@@ -702,14 +765,51 @@ function videosFor(yoyoId) {
     .filter((v) => v.embedUrl); // a row whose provider we no longer build for
 }
 
+// Folds the one-row-per-file photo table into one entry per gallery item: a
+// spin's N frame rows become a single entry carrying a `frames` array.
+//
+// Every entry's `url` and `thumbUrl` point at a STILL image regardless of kind
+// (a video's poster, a spin's first frame). That invariant is what lets the
+// grid, table, For Sale, Arrivals and Insights views keep rendering plain
+// <img> tags with no idea that video or spins exist — only the detail hero and
+// lightbox read `kind` and reach for `videoUrl` / `frames`.
+function collapseMedia(rows) {
+  const out = [];
+  const spinIndex = new Map(); // group_uuid -> position in `out`
+  for (const p of rows) {
+    const full = `/uploads/${p.filename}`;
+    if (p.kind === 'spin' && p.group_uuid) {
+      const at = spinIndex.get(p.group_uuid);
+      if (at != null) { out[at].frames.push(full); continue; }
+      spinIndex.set(p.group_uuid, out.length);
+      out.push({
+        id: p.id, uuid: p.uuid, kind: 'spin', group: p.group_uuid,
+        url: full, thumbUrl: `/uploads/${thumbName(p.filename)}`, frames: [full],
+      });
+      continue;
+    }
+    if (p.kind === 'video') {
+      const poster = posterName(p.filename);
+      out.push({
+        id: p.id, uuid: p.uuid, kind: 'video',
+        url: `/uploads/${poster}`, thumbUrl: `/uploads/${thumbName(poster)}`,
+        videoUrl: full,
+      });
+      continue;
+    }
+    out.push({ id: p.id, uuid: p.uuid, kind: 'photo', url: full, thumbUrl: `/uploads/${thumbName(p.filename)}` });
+  }
+  return out;
+}
+
 // Expands a raw `yoyos` row into the shape the API/client expects: attaches
 // its photos (in sort order, as URLs), parses the `custom` JSON blob back into
 // an object, and adds the computed `percent_off`.
 function decorate(yoyo) {
-  const photos = db
-    .prepare('SELECT id, uuid, filename FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
-    .all(yoyo.id)
-    .map((p) => ({ id: p.id, uuid: p.uuid, url: `/uploads/${p.filename}`, thumbUrl: `/uploads/${thumbName(p.filename)}` }));
+  const photos = collapseMedia(
+    db.prepare('SELECT id, uuid, filename, kind, group_uuid FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
+      .all(yoyo.id)
+  );
   let custom = {};
   try { custom = JSON.parse(yoyo.custom || '{}'); } catch { /* ignore bad JSON */ }
   return { ...yoyo, custom, percent_off: percentOff(yoyo), photos, videos: videosFor(yoyo.id) };
@@ -906,26 +1006,211 @@ app.post('/api/yoyos/:id/photos', upload.array('photos', 12), async (req, res) =
   res.status(201).json(decorate(db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id)));
 });
 
+// Identifies an image by its magic bytes rather than its name. Inside a zip the
+// entry name is attacker-controlled, so an extension there proves nothing about
+// the contents — this is what decides whether a member is stored at all, and
+// what extension it gets.
+function sniffImageExt(buf) {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return '.png';
+  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return '.webp';
+  const gif = buf.subarray(0, 6).toString('latin1');
+  if (gif === 'GIF87a' || gif === 'GIF89a') return '.gif';
+  return null;
+}
+
+// Unpacks a zip of spin frames into UPLOAD_DIR and returns them in frame order,
+// shaped like multer's file objects so the caller can't tell the two paths apart.
+//
+// Nothing from inside the archive reaches the filesystem: names are generated,
+// entry paths are ignored entirely (so a `../../etc/passwd` member is just
+// another image), and members are identified by magic bytes.
+function extractSpinArchive(zipPath) {
+  let entries;
+  try { entries = new AdmZip(zipPath).getEntries(); }
+  catch { throw new Error('That file is not a readable .zip.'); }
+
+  const members = entries
+    .filter((e) => !e.isDirectory)
+    // Skip the metadata folders macOS adds when you right-click → Compress, and
+    // any dotfile — otherwise ._spin_01.jpg doubles every frame.
+    .filter((e) => !e.entryName.split('/').some((seg) => seg === '__MACOSX' || seg.startsWith('.')))
+    .sort((a, b) => path.basename(a.entryName).localeCompare(path.basename(b.entryName), undefined, { numeric: true, sensitivity: 'base' }));
+
+  if (members.length > MAX_SPIN_FRAMES) {
+    throw new Error(`That archive holds ${members.length} files — the limit is ${MAX_SPIN_FRAMES} frames.`);
+  }
+  // Check the declared sizes before writing anything, so a zip bomb is refused
+  // rather than half-extracted.
+  let declared = 0;
+  for (const e of members) {
+    if (e.header.size > MAX_SPIN_FRAME_BYTES) throw new Error('A frame in that archive is larger than 5 MB.');
+    declared += e.header.size;
+  }
+  if (declared > MAX_SPIN_ARCHIVE_BYTES) throw new Error('That archive expands to more than 300 MB.');
+
+  const written = [];
+  try {
+    for (const e of members) {
+      const data = e.getData();
+      const ext = sniffImageExt(data);
+      if (!ext) continue; // not an image — a stray readme, say
+      const filename = tempName(ext);
+      fs.writeFileSync(path.join(UPLOAD_DIR, filename), data);
+      written.push({ filename, originalname: path.basename(e.entryName) });
+    }
+  } catch (err) {
+    // Don't leave a partial sequence behind if one member fails to inflate.
+    for (const f of written) fs.rmSync(path.join(UPLOAD_DIR, f.filename), { force: true });
+    throw err;
+  }
+  return written;
+}
+
+// Uploads a 360 spin as an ordered frame sequence. The client sorts frames by
+// filename before sending, but sort again here so a client that doesn't (or a
+// browser that reorders multipart fields) still gets a spin that rotates
+// smoothly rather than shuffling.
+app.post('/api/yoyos/:id/spin',
+  uploadSpin.fields([{ name: 'frames', maxCount: MAX_SPIN_FRAMES }, { name: 'archive', maxCount: 1 }]),
+  async (req, res) => {
+  const archive = req.files?.archive?.[0];
+  let files = req.files?.frames || [];
+  const discard = () => {
+    files.forEach((f) => fs.rm(path.join(UPLOAD_DIR, f.filename), { force: true }, () => {}));
+    if (archive) fs.rm(path.join(UPLOAD_DIR, archive.filename), { force: true }, () => {});
+  };
+
+  const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  if (!yoyo) { discard(); return res.status(404).json({ error: 'Not found' }); }
+
+  // A zip of frames is the same sequence, just delivered in one file — unpack
+  // it and carry on down the identical path.
+  if (archive) {
+    try {
+      files = extractSpinArchive(path.join(UPLOAD_DIR, archive.filename));
+    } catch (err) {
+      discard();
+      return res.status(400).json({ error: err.message });
+    } finally {
+      fs.rm(path.join(UPLOAD_DIR, archive.filename), { force: true }, () => {});
+    }
+  }
+
+  if (files.length < 2) {
+    discard();
+    return res.status(400).json({
+      error: archive
+        ? 'That archive held fewer than 2 images — a 360 spin needs a frame sequence.'
+        : 'A 360 spin needs at least 2 frames.',
+    });
+  }
+
+  files.sort((a, b) => a.originalname.localeCompare(b.originalname, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const group = crypto.randomUUID();
+  const maxRow = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM photos WHERE yoyo_id = ?').get(req.params.id);
+  let order = maxRow.m + 1;
+  const insert = db.prepare(
+    'INSERT INTO photos (yoyo_id, uuid, filename, kind, group_uuid, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  db.transaction((frames) => {
+    for (const f of frames) insert.run(req.params.id, crypto.randomUUID(), f.filename, 'spin', group, order++);
+    touchYoyo(req.params.id);
+  })(files);
+
+  // Only the first frame needs a thumbnail — it's the still every list view
+  // draws. Thumbnailing the rest would write dozens of images nothing requests.
+  await makeThumb(files[0].filename).catch((e) => console.error('thumb error:', e.message));
+
+  res.status(201).json(decorate(db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id)));
+});
+
+// Uploads a looped video plus the poster frame the browser extracted from it.
+// The poster is mandatory: without it every list view would have to load the
+// video itself just to draw a tile.
+app.post('/api/yoyos/:id/video',
+  uploadVideo.fields([{ name: 'video', maxCount: 1 }, { name: 'poster', maxCount: 1 }]),
+  async (req, res) => {
+    const video = req.files?.video?.[0];
+    const poster = req.files?.poster?.[0];
+    const discard = () => [video, poster].forEach((f) => {
+      if (f) fs.rm(path.join(UPLOAD_DIR, f.filename), { force: true }, () => {});
+    });
+
+    const yoyo = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+    if (!yoyo) { discard(); return res.status(404).json({ error: 'Not found' }); }
+    if (!video) { discard(); return res.status(400).json({ error: 'No video uploaded.' }); }
+    if (!poster) { discard(); return res.status(400).json({ error: 'Could not read a poster frame from that video.' }); }
+
+    // Park the poster at the name derived from the video, so the pairing
+    // survives in the filesystem alone (backup/restore copies files by basename).
+    const posterFile = posterName(video.filename);
+    fs.renameSync(path.join(UPLOAD_DIR, poster.filename), path.join(UPLOAD_DIR, posterFile));
+
+    const maxRow = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM photos WHERE yoyo_id = ?').get(req.params.id);
+    db.transaction(() => {
+      db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, kind, sort_order) VALUES (?, ?, ?, ?, ?)')
+        .run(req.params.id, crypto.randomUUID(), video.filename, 'video', maxRow.m + 1);
+      touchYoyo(req.params.id);
+    })();
+
+    await makeThumb(posterFile).catch((e) => console.error('thumb error:', e.message));
+
+    res.status(201).json(decorate(db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id)));
+  });
+
+// Every file a photo row owns: the media itself, its thumbnail, and (for
+// video) the poster still and the poster's thumbnail.
+function mediaFilesFor(row) {
+  const names = [row.filename, thumbName(row.filename)];
+  if (row.kind === 'video') {
+    const poster = posterName(row.filename);
+    names.push(poster, thumbName(poster));
+  }
+  return names;
+}
+
 app.delete('/api/photos/:photoId', (req, res) => {
   const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(req.params.photoId);
   if (!photo) return res.status(404).json({ error: 'Not found' });
+  // A spin is one gallery item, so deleting it deletes the whole sequence —
+  // removing a single frame would leave a rotation that jumps.
+  const rows = photo.kind === 'spin' && photo.group_uuid
+    ? db.prepare('SELECT * FROM photos WHERE group_uuid = ? AND yoyo_id = ?').all(photo.group_uuid, photo.yoyo_id)
+    : [photo];
+  const del = db.prepare('DELETE FROM photos WHERE id = ?');
   db.transaction(() => {
-    db.prepare('DELETE FROM photos WHERE id = ?').run(req.params.photoId);
+    for (const r of rows) del.run(r.id);
     touchYoyo(photo.yoyo_id);
   })();
-  fs.rm(path.join(UPLOAD_DIR, photo.filename), { force: true }, () => {});
-  fs.rm(path.join(UPLOAD_DIR, thumbName(photo.filename)), { force: true }, () => {});
+  for (const r of rows) {
+    for (const name of mediaFilesFor(r)) {
+      fs.rm(path.join(UPLOAD_DIR, name), { force: true }, () => {});
+    }
+  }
   res.json({ ok: true });
 });
 
 // One-time backfill: generate thumbnails for existing photos (idempotent).
 app.post('/api/photos/optimize', async (req, res) => {
   if (!sharp) return res.status(503).json({ error: 'Image processing (sharp) is not installed on this server.' });
-  const rows = db.prepare('SELECT filename FROM photos').all();
+  const rows = db.prepare('SELECT filename, kind, group_uuid FROM photos ORDER BY sort_order, id').all();
   let processed = 0, skipped = 0, failed = 0;
+  const seenSpin = new Set();
   for (const r of rows) {
-    if (fs.existsSync(path.join(UPLOAD_DIR, thumbName(r.filename)))) { skipped++; continue; }
-    try { await makeThumb(r.filename); processed++; } catch (e) { console.error('optimize:', e.message); failed++; }
+    // Only a spin's lead frame is ever drawn as a still; thumbnailing the rest
+    // would write dozens of images nothing requests.
+    if (r.kind === 'spin' && r.group_uuid) {
+      if (seenSpin.has(r.group_uuid)) { skipped++; continue; }
+      seenSpin.add(r.group_uuid);
+    }
+    // sharp can't decode video, so a video row's still is its poster frame.
+    const src = r.kind === 'video' ? posterName(r.filename) : r.filename;
+    if (!fs.existsSync(path.join(UPLOAD_DIR, src))) { skipped++; continue; }
+    if (fs.existsSync(path.join(UPLOAD_DIR, thumbName(src)))) { skipped++; continue; }
+    try { await makeThumb(src); processed++; } catch (e) { console.error('optimize:', e.message); failed++; }
   }
   res.json({ total: rows.length, processed, skipped, failed });
 });
@@ -936,8 +1221,22 @@ app.put('/api/yoyos/:id/photos/order', (req, res) => {
   if (!yoyo) return res.status(404).json({ error: 'Not found' });
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n) => Number.isFinite(n)) : [];
   const upd = db.prepare('UPDATE photos SET sort_order = ? WHERE id = ? AND yoyo_id = ?');
+  // The client reorders gallery items, but sort_order lives on files. Each id
+  // is a spin's first frame or a standalone photo/video, so expand it back into
+  // its rows and hand out a contiguous block — that keeps a spin's frames
+  // adjacent and in sequence no matter where the spin lands in the gallery.
+  const rowsFor = (pid) => {
+    const row = db.prepare('SELECT id, kind, group_uuid FROM photos WHERE id = ? AND yoyo_id = ?').get(pid, req.params.id);
+    if (!row) return [];
+    if (row.kind !== 'spin' || !row.group_uuid) return [row.id];
+    return db.prepare('SELECT id FROM photos WHERE group_uuid = ? AND yoyo_id = ? ORDER BY sort_order, id')
+      .all(row.group_uuid, req.params.id).map((r) => r.id);
+  };
   db.transaction(() => {
-    ids.forEach((pid, i) => upd.run(i, pid, req.params.id));
+    let order = 0;
+    for (const pid of ids) {
+      for (const rowId of rowsFor(pid)) upd.run(order++, rowId, req.params.id);
+    }
     touchYoyo(req.params.id);
   })();
   res.json(decorate(db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id)));
@@ -996,7 +1295,7 @@ app.delete('/api/videos/:videoId', (req, res) => {
 
 const SQL_TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const MANIFEST_EXTS = new Set(['jpg', 'png', 'webp', 'gif']);
+const MANIFEST_EXTS = new Set(['jpg', 'png', 'webp', 'gif', 'mp4', 'webm']);
 
 // Same shape as SQLite's datetime('now') so string comparisons stay valid.
 function nowSql() {
@@ -1071,14 +1370,17 @@ function applyPhotoManifest(yoyoId, manifest) {
   for (const m of Array.isArray(manifest) ? manifest : []) {
     if (!UUID_RE.test(String(m?.uuid || ''))) continue;
     const ext = MANIFEST_EXTS.has(String(m?.ext || '').toLowerCase()) ? String(m.ext).toLowerCase() : 'jpg';
-    entries.push({ uuid: m.uuid, sort_order: Number(m.sort_order) || 0, ext });
+    // A client that predates spin/video omits these and gets a plain photo,
+    // which is what its manifest meant.
+    const kind = ['photo', 'video', 'spin'].includes(m?.kind) ? m.kind : 'photo';
+    const groupUuid = kind === 'spin' && UUID_RE.test(String(m?.group_uuid || '')) ? m.group_uuid : null;
+    entries.push({ uuid: m.uuid, sort_order: Number(m.sort_order) || 0, ext, kind, group_uuid: groupUuid });
   }
   const keep = new Set(entries.map((e) => e.uuid));
   for (const p of db.prepare('SELECT * FROM photos WHERE yoyo_id = ?').all(yoyoId)) {
     if (keep.has(p.uuid)) continue;
     db.prepare('DELETE FROM photos WHERE id = ?').run(p.id);
-    fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+    for (const name of mediaFilesFor(p)) fs.rm(path.join(UPLOAD_DIR, name), { force: true }, () => {});
   }
   for (const e of entries) {
     const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(e.uuid);
@@ -1087,8 +1389,8 @@ function applyPhotoManifest(yoyoId, manifest) {
       db.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').run(e.sort_order, row.id);
       if (!fs.existsSync(path.join(UPLOAD_DIR, row.filename))) missing.push(e.uuid);
     } else {
-      db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, sort_order) VALUES (?, ?, ?, ?)')
-        .run(yoyoId, e.uuid, `${e.uuid}.${e.ext}`, e.sort_order);
+      db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, kind, group_uuid, sort_order) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(yoyoId, e.uuid, `${e.uuid}.${e.ext}`, e.kind, e.group_uuid, e.sort_order);
       missing.push(e.uuid);
     }
   }
@@ -1212,10 +1514,10 @@ const uploadSyncPhoto = multer({
     destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
     filename: (req, file, cb) => cb(null, `${req.params.photoUuid}${EXT_BY_MIME[file.mimetype] || '.jpg'}`),
   }),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (ALLOWED_IMAGE_TYPES.has(file.mimetype)) cb(null, true);
-    else cb(new Error('Only image files are allowed (jpg, png, webp, gif).'));
+    if (ALLOWED_IMAGE_TYPES.has(file.mimetype) || ALLOWED_VIDEO_TYPES.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Only image or video files are allowed.'));
   },
 });
 
@@ -1249,7 +1551,10 @@ app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
     db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?').run(rev, yoyo.id);
   })();
 
-  await makeThumb(req.file.filename).catch((e) => console.error('thumb error:', e.message));
+  // Video has no server-side decoder here; its poster arrives as its own row.
+  if (ALLOWED_IMAGE_TYPES.has(req.file.mimetype)) {
+    await makeThumb(req.file.filename).catch((e) => console.error('thumb error:', e.message));
+  }
   res.json({ ok: true, url: `/uploads/${req.file.filename}`, rev });
 });
 
