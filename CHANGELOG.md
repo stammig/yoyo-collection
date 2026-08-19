@@ -11,6 +11,18 @@ changes app behavior gets an entry — newest first.
   puts the cursor in Color. Condition, photos, edition, serial number, and
   purchase, sale and shipping details start blank. The native apps have the
   same action.
+## 2026-08-19
+- **Two fixes to the 360°/video media work below** —
+  - `/api/sync/changes` was sending each photo without its `kind` or
+    `group_uuid`, so a sync client would have rendered a 360 spin as N loose
+    frames and pushed back a manifest that flattened it permanently. Both
+    fields now ride along with every photo in the change feed.
+  - Soft-deleting a yoyo freed its photo files and thumbnails but not a looping
+    video's poster still (or that poster's thumbnail), leaving them orphaned in
+    `uploads/`. Both tombstone paths — `DELETE /api/yoyos/:id` and a delete
+    arriving via sync push — now go through `mediaFilesFor`, so every file a row
+    owns is removed whatever its kind.
+
 ## 2026-08-18
 - **360° spins and looping video** — a yoyo's gallery can now hold more than
   stills. **Add 360° spin** takes a numbered frame sequence and renders a

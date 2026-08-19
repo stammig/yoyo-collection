@@ -954,12 +954,12 @@ app.delete('/api/yoyos/:id', (req, res) => {
   const existing = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
-  // Free the disk now (a tombstone doesn't need its photos) — remove both the
-  // full images and their thumbnails, then drop the photo rows.
-  const photos = db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(req.params.id);
+  // Free the disk now (a tombstone doesn't need its media) — every file each row
+  // owns, which for a video means its poster still and that poster's thumbnail
+  // as well, then drop the photo rows.
+  const photos = db.prepare('SELECT filename, kind FROM photos WHERE yoyo_id = ?').all(req.params.id);
   for (const p of photos) {
-    fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+    for (const name of mediaFilesFor(p)) fs.rm(path.join(UPLOAD_DIR, name), { force: true }, () => {});
   }
   // Keep the yoyo row as a tombstone (deleted_at set) so the deletion propagates
   // to other devices on sync, rather than re-appearing from a device that still has it.
@@ -1336,13 +1336,18 @@ app.get('/api/sync/changes', (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
 
   const rows = db.prepare('SELECT * FROM yoyos WHERE rev > ? ORDER BY rev LIMIT ?').all(since, limit);
-  const photosFor = db.prepare('SELECT uuid, filename, sort_order FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id');
+  const photosFor = db.prepare('SELECT uuid, filename, kind, group_uuid, sort_order FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id');
   const yoyos = rows.map((r) => {
     let custom = {};
     try { custom = JSON.parse(r.custom || '{}'); } catch { /* ignore bad JSON */ }
+    // kind/group_uuid ride along so a client can reassemble a spin's frames into
+    // one gallery item instead of showing them as N loose photos — and so the
+    // manifest it pushes back doesn't flatten the spin.
     const photos = r.deleted_at ? [] : photosFor.all(r.id).map((p) => ({
       uuid: p.uuid,
       sort_order: p.sort_order,
+      kind: p.kind,
+      group_uuid: p.group_uuid,
       url: `/uploads/${p.filename}`,
       thumb_url: `/uploads/${thumbName(p.filename)}`,
     }));
@@ -1471,11 +1476,10 @@ app.post('/api/sync/push', (req, res) => {
           results.push({ uuid, applied: false, reason: 'server-newer' });
           continue;
         }
-        // A pushed delete mirrors DELETE /api/yoyos/:id — photo files go now.
+        // A pushed delete mirrors DELETE /api/yoyos/:id — media files go now.
         if (deletedAt && !existing.deleted_at) {
-          for (const p of db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id)) {
-            fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-            fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+          for (const p of db.prepare('SELECT filename, kind FROM photos WHERE yoyo_id = ?').all(existing.id)) {
+            for (const name of mediaFilesFor(p)) fs.rm(path.join(UPLOAD_DIR, name), { force: true }, () => {});
           }
           db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(existing.id);
           db.prepare('DELETE FROM videos WHERE yoyo_id = ?').run(existing.id);
