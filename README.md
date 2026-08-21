@@ -273,11 +273,11 @@ ordered numerically either way, so `spin_2.jpg` correctly lands before
 - Drop the duplicate final frame; a full turn ends where it started, and keeping
   both makes the loop stutter.
 
-If you have a video instead of frames, ffmpeg on your own machine will do it:
-```bash
-ffmpeg -i spin.mov -vf "fps=12,scale=1000:-2" -q:v 3 frames/spin_%03d.jpg
-```
-Rotate it by dragging, or with the ← / → keys when it has focus.
+If you have a video instead of frames, the bundled
+[`spin-frames.sh`](SPIN-FRAMES.md) does the whole job — it detects where your
+hand leaves the shot and how long one turntable rotation takes, then emits the
+frames, a ready-to-upload zip, and a loop `.mp4`, for one clip or a folder of
+them. Rotate the result by dragging, or with the ← / → keys when it has focus.
 
 ### Looping video
 **Add video** takes a short `.mp4` or `.webm` (up to 50 MB). It autoplays,

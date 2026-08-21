@@ -53,6 +53,18 @@ changes app behavior gets an entry — newest first.
     arriving via sync push — now go through `mediaFilesFor`, so every file a row
     owns is removed whatever its kind.
 
+## 2026-08-21
+- **`spin-frames.sh` + SPIN-FRAMES.md** — a companion script (runs on your own
+  machine, not the server) that turns turntable videos into ready-to-upload
+  360° spins: it auto-detects the in-point (when your hand leaves the shot,
+  via ffmpeg signalstats) and the rotation period (SSIM against a reference
+  frame, earliest peak = one full turn), then emits the frame sequence, a
+  zip of it, and a muted H.264 loop. Takes single files or whole folders;
+  `-p` skips detection when the turntable's period is known. Only needs
+  ffmpeg/ffprobe/zip. Field-tested on GoPro footage of both fast (~31s) and
+  slow (~62s) turntable modes, including the mirror-side half-rotation trap
+  the doc explains.
+
 ## 2026-08-18
 - **360° spins and looping video** — a yoyo's gallery can now hold more than
   stills. **Add 360° spin** takes a numbered frame sequence and renders a
