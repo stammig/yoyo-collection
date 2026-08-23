@@ -55,9 +55,14 @@ Two detectors, both plain ffmpeg:
   so the loop wraps without a duplicated-frame stutter.
 
 Each clip reports what was detected (`rotation period: 30.90s (detected,
-match 0.971)`) and writes `check-loop.jpg` into the frames folder — the
-first and last frame side by side. If those two don't look near-identical,
-the loop will visibly jump; trust that image over any score.
+match 0.971)`) and writes two QA images into the frames folder:
+
+- `check-loop.jpg` — the first and last frame side by side. If those two
+  don't look near-identical, the loop will visibly jump; trust that image
+  over any score.
+- `check-center.jpg` — a mid-rotation frame with red crosshairs at frame
+  center. The lines should land on the yoyo's axle; if they don't, see the
+  `-L` notes under Auto-centering.
 
 ### Auto-centering
 

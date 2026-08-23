@@ -37,8 +37,11 @@
 #   <name>-spin.zip               the frames zipped, for the app's zip upload
 #   <name>-loop.mp4               muted H.264 loop (skipped with -M)
 #
-# Eyeball check: <name>-spin/check-loop.jpg is the first and last frame side
-# by side — if they don't look nearly identical, the loop will visibly jump.
+# Eyeball checks, one image each per spin:
+#   check-loop.jpg    first + last frame side by side — if they don't look
+#                     nearly identical, the loop will visibly jump.
+#   check-center.jpg  a mid-rotation frame with red crosshairs at frame
+#                     center — the lines should land on the yoyo's axle.
 # Defaults keep frames far inside the app's 5 MB/frame limit.
 set -euo pipefail
 
@@ -309,6 +312,12 @@ EOF
   first="$out/spin_001.jpg"
   last="$out/$(ls "$out" | grep '^spin_' | tail -1)"
   $FF -i "$first" -i "$last" -filter_complex hstack "$out/check-loop.jpg"
+
+  # Centering check: a mid-rotation frame (the widest pose) with crosshairs at
+  # frame center — the lines should land on the yoyo's axle. Judge this by eye
+  # the same way you judge check-loop.jpg.
+  mid="$out/$(ls "$out" | grep '^spin_' | awk 'NR==1{n=0} {a[++n]=$0} END{print a[int(n/2)]}')"
+  $FF -i "$mid" -vf "drawbox=x=iw/2-1:y=0:w=2:h=ih:color=red@0.8:t=fill,drawbox=x=0:y=ih/2-1:w=iw:h=2:color=red@0.8:t=fill" "$out/check-center.jpg"
 
   (cd "$out" && rm -f "../$base-spin.zip" && zip -q "../$base-spin.zip" spin_*.jpg)
 
