@@ -16,9 +16,21 @@
 #   -s SECONDS   skip this much lead-in before the reference frame
 #                (default: auto — finds when your hand leaves the shot)
 #   -n FRAMES    frames per rotation to extract (default 60; app cap is 180)
-#   -w PIXELS    frame width (default 1000)
+#   -w PIXELS    output size (default 1000; frames are square when centered)
 #   -p SECONDS   skip detection and use this rotation period
 #   -M           skip making the loop .mp4
+#   -C           don't auto-center (keep the full frame, old behavior)
+#   -m FRACTION  breathing room around the yoyo when centering (default 0.18)
+#   -L LIMIT     centering motion threshold 0-255 (default 96). Raise it if
+#                reflections widen the box; lower it if a slow, dim spin
+#                leaves part of the yoyo outside the crop.
+#
+# Auto-centering: the yoyo doesn't have to sit dead-center on the table. It is
+# found by MOTION — the yoyo is the only thing in the shot that rotates, so
+# differencing consecutive frames across one full rotation lights up exactly
+# the yoyo (any color, any exposure, white-on-white included) while the tent,
+# table, stand, and shadows stay dark. Frames are cropped to a square centered
+# on that motion box and scaled to -w. Shoot 4K for crop headroom.
 #
 # Output, next to each input video:
 #   <name>-spin/spin_001.jpg...   the frames (plus check-loop.jpg, see below)
@@ -30,18 +42,28 @@
 # Defaults keep frames far inside the app's 5 MB/frame limit.
 set -euo pipefail
 
-SKIP=""; TARGET=60; WIDTH=1000; PERIOD=""; MAKE_MP4=1
+SKIP=""; TARGET=60; WIDTH=1000; PERIOD=""; MAKE_MP4=1; CENTER=1; MARGIN=0.18
+LIMIT=96   # centering motion threshold, applied to frame-to-frame differences
+           # amplified 8x. The box is per-pixel, so the bar must clear ALL
+           # ambient motion, not just the median: sensor noise and — measured
+           # on real light-tent footage — the yoyo's own moving reflection on
+           # the tent wall reach ~48-90 amplified, while true rotation edges
+           # saturate toward 255. 96 tracked the yoyo to the pixel on white,
+           # dark, ringed, and splash colorways alike.
 MIN_PERIOD=5          # ignore SSIM peaks earlier than this (yoyo is symmetric;
                       # a half-turn can look briefly similar on some finishes)
 ANALYZE_FPS=10        # detection sample rate; 10/s at 320px gray is plenty
 
-while getopts "s:n:w:p:M" opt; do
+while getopts "s:n:w:p:Mm:L:C" opt; do
   case $opt in
     s) SKIP=$OPTARG ;;
     n) TARGET=$OPTARG ;;
     w) WIDTH=$OPTARG ;;
     p) PERIOD=$OPTARG ;;
     M) MAKE_MP4=0 ;;
+    C) CENTER=0 ;;
+    m) MARGIN=$OPTARG ;;
+    L) LIMIT=$OPTARG ;;
     *) exit 1 ;;
   esac
 done
@@ -123,6 +145,91 @@ detect_period() { # $1=video $2=in-point  -> echoes period seconds, or "" on wea
   rm -f "$ref" "$log"
 }
 
+# Finds the yoyo's bounding box across one full rotation — by MOTION, not
+# color: the yoyo is the only thing in the shot that rotates, while the tent,
+# table, stand, and their shadows hold still. Consecutive sampled frames are
+# differenced (tblend), the small luma differences amplified 8x, and ffmpeg's
+# bbox filter reports the per-frame box of every pixel that moved — per-PIXEL,
+# which matters: cropdetect judges whole rows/columns by average and goes
+# blind to a small subject on a wide 4K frame.
+#
+# Two defenses keep reflections from skewing the result (a rotating yoyo's
+# reflection moving on a glossy tent wall IS real motion, and field footage
+# showed it stretching naive boxes clear to the frame edge):
+#   - The GEOMETRY is robust, not a min/max union: the crop centers on the
+#     MEDIAN of the per-frame box centers, sized by 95th-percentile extents,
+#     so a flicker in a handful of frames can't drag it.
+#   - If the box still isn't yoyo-shaped (much wider than tall, or spanning
+#     most of the frame), the threshold ESCALATES 1.5x and tries again, up to
+#     twice — dim reflections drop out long before true rotation edges.
+# Detection runs at 960px with a median denoise pass; results are scaled back
+# to source pixels.
+DETECT_W=960
+bbox_pass() { # $1=video $2=in-point $3=period $4=source-width $5=threshold -> "X Y W H" if yoyo-shaped
+  local log
+  log=$(mktemp "${TMPDIR:-/tmp}/spinbbox.XXXXXX")
+  $FF -ss "$2" -t "$3" -i "$1" \
+    -vf "fps=5,scale=$DETECT_W:-2,format=gray,tblend=all_mode=difference,lutyuv=y='clip(val*8,0,255)',median=radius=1,bbox=min_val=$5,metadata=print:file=$log" \
+    -f null - 2>/dev/null
+  awk -v sf="$(awk -v iw="$4" -v dw="$DETECT_W" 'BEGIN { printf "%.6f", iw/dw }')" -v dw="$DETECT_W" '
+    function sorted(src, n, dst,   i, j, t) {
+      for (i = 1; i <= n; i++) dst[i] = src[i]
+      for (i = 2; i <= n; i++) { t = dst[i]; j = i - 1
+        while (j > 0 && dst[j] > t) { dst[j+1] = dst[j]; j-- }
+        dst[j+1] = t }
+    }
+    /lavfi.bbox.x1=/ { split($0,a,"="); x1[++n]=a[2]+0 }
+    /lavfi.bbox.y1=/ { split($0,a,"="); y1[n]=a[2]+0 }
+    /lavfi.bbox.x2=/ { split($0,a,"="); x2[n]=a[2]+0 }
+    /lavfi.bbox.y2=/ { split($0,a,"="); y2[n]=a[2]+0 }
+    END {
+      if (n < 20) exit                       # too few moving frames to trust
+      for (i = 1; i <= n; i++) {
+        cx[i] = (x1[i] + x2[i]) / 2; cy[i] = (y1[i] + y2[i]) / 2
+        w[i]  = x2[i] - x1[i] + 1;   h[i]  = y2[i] - y1[i] + 1
+      }
+      sorted(cx, n, scx); sorted(cy, n, scy); sorted(w, n, sw); sorted(h, n, sh)
+      mx = scx[int(n/2)+1]; my = scy[int(n/2)+1]
+      p = int(0.95 * n); if (p < 1) p = 1
+      bw = sw[p]; bh = sh[p]
+      # Yoyo-shaped or bust: reflections stretch boxes wide and shallow, and a
+      # bumped camera reads as full-frame motion. Reject both and let the
+      # caller escalate the threshold instead of mis-centering.
+      if (bw > 1.45 * bh || bw > 0.8 * dw || bw < 0.1 * dw) exit
+      printf "%d %d %d %d", (mx - bw/2) * sf, (my - bh/2) * sf, bw * sf, bh * sf
+    }
+  ' "$log"
+  rm -f "$log"
+}
+
+detect_bbox() { # $1=video $2=in-point $3=period $4=source-width  -> "X Y W H THRESHOLD" or ""
+  local L=$LIMIT try box
+  for try in 1 2 3; do
+    box=$(bbox_pass "$1" "$2" "$3" "$4" "$L")
+    if [ -n "$box" ]; then echo "$box $L"; return; fi
+    L=$(awk -v l="$L" 'BEGIN { printf "%d", l * 1.5 }')
+  done
+}
+
+# Turns a bounding box into a centered square crop with breathing room,
+# clamped to the frame. Echoes "W:H:X:Y" for ffmpeg's crop filter, or ""
+# when the box spans (nearly) the whole frame — i.e. the background never
+# read as background, so cropping would be a guess.
+square_crop() { # $1=bx $2=by $3=bw $4=bh $5=iw $6=ih  -> echoes crop args or ""
+  awk -v bx="$1" -v by="$2" -v bw="$3" -v bh="$4" -v iw="$5" -v ih="$6" -v m="$MARGIN" '
+    BEGIN {
+      if (bw >= 0.97*iw && bh >= 0.97*ih) exit   # detection saw no background
+      side = (bw > bh ? bw : bh) * (1 + 2*m)
+      max = (iw < ih ? iw : ih); if (side > max) side = max
+      side = int(side/2)*2
+      x = int(bx + bw/2 - side/2); y = int(by + bh/2 - side/2)
+      if (x < 0) x = 0; if (y < 0) y = 0
+      if (x + side > iw) x = iw - side
+      if (y + side > ih) y = ih - side
+      printf "%d:%d:%d:%d", side, side, int(x/2)*2, int(y/2)*2
+    }'
+}
+
 for video in "${VIDEOS[@]}"; do
   base=$(basename "${video%.*}")
   dir=$(dirname "$video")
@@ -163,6 +270,32 @@ EOF
     echo "   rotation period: ${period}s (manual)"
   fi
 
+  # Auto-center: find the yoyo across one rotation and build a square crop
+  # around it, so it needn't sit dead-center on the turntable.
+  cropf=""
+  cropnote="full frame"
+  if [ "$CENTER" = 1 ]; then
+    read -r iw ih <<EOF
+$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$video" | tr ',' ' ')
+EOF
+    bbox=$(detect_bbox "$video" "$inpoint" "$period" "$iw")
+    if [ -n "$bbox" ]; then
+      read -r bx by bw bh usedL <<EOF
+$bbox
+EOF
+      crop=$(square_crop "$bx" "$by" "$bw" "$bh" "$iw" "$ih")
+      if [ -n "$crop" ]; then
+        cropf="crop=$crop,"
+        cropnote="centered (yoyo at ${bw}x${bh}+${bx}+${by}, motion >= $usedL -> crop $crop)"
+      else
+        cropnote="full frame (subject box implausible; try -L higher)"
+      fi
+    else
+      cropnote="full frame (no yoyo-shaped motion found; camera moved, or try -L)"
+    fi
+    echo "   framing: $cropnote"
+  fi
+
   # Stop half a frame-interval short of a full turn: the frame at exactly
   # `period` equals frame 1, and a duplicated endpoint stutters on loop.
   read -r fps dur <<EOF
@@ -170,7 +303,7 @@ $(awk -v p="$period" -v t="$TARGET" 'BEGIN { printf "%.4f %.3f", t/p, p*(t-0.5)/
 EOF
 
   rm -rf "$out"; mkdir -p "$out"
-  $FF -ss "$inpoint" -t "$dur" -i "$video" -vf "fps=$fps,scale=$WIDTH:-2" -q:v 3 "$out/spin_%03d.jpg"
+  $FF -ss "$inpoint" -t "$dur" -i "$video" -vf "${cropf}fps=$fps,scale=$WIDTH:-2" -q:v 3 "$out/spin_%03d.jpg"
   count=$(ls "$out" | grep -c '^spin_')
 
   first="$out/spin_001.jpg"
@@ -181,7 +314,7 @@ EOF
 
   if [ "$MAKE_MP4" = 1 ]; then
     $FF -ss "$inpoint" -t "$period" -i "$video" -an -c:v libx264 -preset slow -crf 24 \
-      -pix_fmt yuv420p -vf "fps=30,scale=1080:-2" -movflags +faststart "$dir/$base-loop.mp4"
+      -pix_fmt yuv420p -vf "${cropf}fps=30,scale=1080:-2" -movflags +faststart "$dir/$base-loop.mp4"
     mp4size=$(du -h "$dir/$base-loop.mp4" | cut -f1 | tr -d ' ')
   else
     mp4size="skipped"

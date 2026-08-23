@@ -31,8 +31,11 @@ camera footage lives.
 | `-p SECONDS` | your turntable's seconds-per-rotation (skips detection) | auto-detect |
 | `-s SECONDS` | trim this much lead-in (skips in-point detection) | auto-detect |
 | `-n FRAMES` | frames per rotation | 60 (app cap: 180) |
-| `-w PIXELS` | frame width | 1000 |
+| `-w PIXELS` | output size (square when auto-centered) | 1000 |
 | `-M` | skip the loop `.mp4` | off |
+| `-C` | don't auto-center — keep the full frame | centering on |
+| `-m FRACTION` | breathing room around the yoyo when centering | 0.18 |
+| `-L LIMIT` | centering motion threshold, 0-255 (see below) | 96 |
 
 Outputs land next to each input video. Re-running a folder is safe — the
 script ignores its own `-loop.mp4` outputs.
@@ -56,6 +59,40 @@ match 0.971)`) and writes `check-loop.jpg` into the frames folder — the
 first and last frame side by side. If those two don't look near-identical,
 the loop will visibly jump; trust that image over any score.
 
+### Auto-centering
+
+The yoyo doesn't need to sit dead-center on the turntable. The script finds
+it by **motion**: the yoyo is the only thing in the shot that rotates, so
+differencing consecutive frames across one full rotation lights up exactly
+the yoyo — any colorway, any exposure, white-on-white included — while the
+tent, table, stand, and shadows stay dark. ffmpeg's `bbox` filter takes the
+per-pixel box of everything that moved (a small speckle-cleanup pass keeps
+sensor noise out of it), the boxes are unioned across the rotation, and each
+frame is cropped to a square centered on the result before scaling to `-w`.
+Frames and the loop `.mp4` get the same framing, so they always match.
+
+The measurement is deliberately paranoid, because field footage earned it:
+the crop centers on the **median** of the per-frame boxes (sized by their
+95th percentile), so a stray flicker can't drag it — and if the box still
+doesn't come out roughly yoyo-shaped, the threshold escalates 1.5× and tries
+again, up to twice, before giving up.
+
+Two honest limits:
+
+- **Reflections count as motion.** A rotating yoyo's reflection moving on a
+  glossy tent wall or table is real movement — it's why the default threshold
+  sits at 96 rather than just above sensor noise, and it's what the automatic
+  escalation exists to shed. If a crop still looks off, *raise* `-L`; if part
+  of the yoyo is left outside the crop, *lower* it. The box in the script's
+  output (`yoyo at WxH+X+Y, motion >= L`) tells you what it saw and which
+  threshold finally produced it.
+- **The camera must be locked.** Motion detection assumes the only motion is
+  the yoyo — a handheld or bumped clip reads as full-frame motion and the
+  script falls back to the uncropped frame rather than guessing.
+
+Shoot 4K to give the crop headroom — a 4K frame cropped to the yoyo still
+lands well above the 1000px output size, so the frames stay crisp.
+
 ### The half-rotation caveat
 
 Half a rotation shows the yoyo's *other* cup. On a centered, two-sided
@@ -70,8 +107,14 @@ or pass `-p` with your table's true period.
 
 - **Lock the camera.** Tripod or propped phone — both detectors assume the
   only motion is the turntable. A handheld clip fails detection.
-- **Plain, static background,** with the yoyo filling a good share of the
-  frame. The similarity signal is strongest when the subject dominates.
+- **Plain, static background** — a photography light tent is ideal: even
+  white keeps period detection strong *and* is what auto-centering needs to
+  isolate the yoyo, so placement on the table stops mattering.
+- **Shoot 4K at 30fps.** 4K buys crop headroom for auto-centering; 30fps is
+  the right rate, not a compromise — frames are extracted at ~2/s and the
+  loop renders at 30, so 60fps doubles file size and heat for zero output
+  difference (and at 30 the camera spends more bitrate and shutter time on
+  each frame, which in a bright tent means cleaner stills).
 - **Capture at least one full rotation** after your hand leaves, plus a few
   seconds of margin. Know your table: a "30s" turntable often runs a couple
   of seconds over.
