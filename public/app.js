@@ -3063,6 +3063,12 @@ function openDetail(id, list) {
   $('#detailBody').querySelectorAll('img[data-full]').forEach((img) =>
     img.addEventListener('click', () => openLightbox(img.dataset.full))
   );
+  // Gallery entries open by index so a spin or video reopens interactive
+  // rather than as the still the strip was showing.
+  $('#detailBody').querySelectorAll('.gallery-item').forEach((el) =>
+    el.addEventListener('click', () => openLightbox(y.photos[Number(el.dataset.mi)]))
+  );
+  wireSpins($('#detailBody'));
   // Quick actions in the hero (owner only)
   $('#detailBody').querySelectorAll('[data-da]').forEach((b) => b.addEventListener('click', () => {
     const act = b.dataset.da;
@@ -3081,9 +3087,9 @@ function openDetail(id, list) {
 // custom fields, and the description.
 function detailHTML(y) {
   // ---- Hero summary (lead media + key facts) ----
-  const lead = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" data-full="${esc(y.photos[0].url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
-    : '<span class="placeholder"></span>';
+  // The lead is the one place a spin or video plays in the page itself; the
+  // rest of the gallery stays still until opened in the lightbox.
+  const lead = y.photos[0] ? mediaHTML(y.photos[0], 'detail-lead') : '<span class="placeholder"></span>';
 
   const chips = [];
   if (y.composition) chips.push(`<span class="tag clickable" data-filt="compositions:${esc(y.composition)}">${esc(fmtField('composition', y.composition))}</span>`);
@@ -3112,8 +3118,11 @@ function detailHTML(y) {
       <button class="hero-act" data-da="edit">${SVG.edit}<span>Edit</span></button>
     </div>` : '';
 
+  // An interactive lead needs room — a 360 is unusable at thumbnail size.
+  const leadKind = y.photos[0] ? y.photos[0].kind : 'photo';
+  const leadMotion = (leadKind === 'spin' || leadKind === 'video') ? ' motion' : '';
   const hero = `<div class="detail-hero">
-      <div class="detail-hero-media">${lead}</div>
+      <div class="detail-hero-media${leadMotion}">${lead}</div>
       <div class="detail-hero-info">
         ${(statusBadge || retiredBadge || chipHTML) ? `<div class="detail-hero-chips">${statusBadge}${retiredBadge}${chipHTML}</div>` : ''}
         ${priceRow}
@@ -3124,7 +3133,8 @@ function detailHTML(y) {
   // Remaining photos (the first is the hero lead).
   const rest = y.photos.slice(1);
   const gallery = rest.length
-    ? `<div class="detail-gallery">${rest.map((p) => `<img src="${esc(p.thumbUrl || p.url)}" data-full="${esc(p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />`).join('')}</div>`
+    ? `<div class="detail-gallery">${rest.map((p, i) =>
+        `<button type="button" class="gallery-item" data-mi="${i + 1}">${mediaStillHTML(p)}</button>`).join('')}</div>`
     : '';
 
   // Pricing + status live in the hero, so omit those groups here.
@@ -3708,10 +3718,10 @@ function renderPhotoStrip(photos) {
     ? '<p class="hint photo-hint">Drag to reorder — the first photo is the cover.</p>' : '';
   photoStrip.innerHTML =
     photos.map((p, i) => `
-      <div class="photo-thumb" draggable="true" data-pid="${p.id}">
-        <img src="${esc(p.thumbUrl || p.url)}" alt="" data-full="${esc(p.url)}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />
+      <div class="photo-thumb" draggable="true" data-pid="${p.id}" data-mi="${i}">
+        ${mediaStillHTML(p)}
         ${i === 0 ? '<span class="cover-badge">Cover</span>' : ''}
-        <button type="button" class="photo-del" data-photo="${p.id}" title="Remove photo">✕</button>
+        <button type="button" class="photo-del" data-photo="${p.id}" title="${p.kind === 'spin' ? 'Remove 360 spin (all frames)' : p.kind === 'video' ? 'Remove video' : 'Remove photo'}">✕</button>
         <div class="photo-move">
           <button type="button" data-pmove="${p.id}:-1" ${i === 0 ? 'disabled' : ''} title="Move earlier">‹</button>
           <button type="button" data-pmove="${p.id}:1" ${i === photos.length - 1 ? 'disabled' : ''} title="Move later">›</button>
@@ -3728,8 +3738,8 @@ function renderPhotoStrip(photos) {
       movePhoto(pid, dir);
     })
   );
-  photoStrip.querySelectorAll('img[data-full]').forEach((img) =>
-    img.addEventListener('click', () => openLightbox(img.dataset.full))
+  photoStrip.querySelectorAll('.photo-thumb img').forEach((img) =>
+    img.addEventListener('click', () => openLightbox(photos[Number(img.closest('.photo-thumb').dataset.mi)]))
   );
   wirePhotoDragDrop();
 }
@@ -3981,6 +3991,123 @@ const dropzone = $('#dropzone');
 );
 dropzone.addEventListener('drop', (e) => { uploadFiles(e.dataTransfer.files); });
 
+// ---- 360 spin / video uploads ----
+// Both post to their own endpoint rather than the photo one, because a spin is
+// many files that form a single gallery item and a video needs a poster frame
+// alongside it.
+
+const isZip = (f) => /\.zip$/i.test(f.name) || /zip/i.test(f.type);
+
+async function uploadSpin(fileList) {
+  if (demoGuard()) return;
+  if (!editingId) { toast('Save the yoyo first, then add a 360 spin.', 'error'); return; }
+  const picked = [...(fileList || [])];
+
+  // A zip of the sequence goes up as one file and is unpacked server-side —
+  // turntable software usually hands you a folder, not 36 loose images.
+  const zip = picked.find(isZip);
+  if (zip) {
+    const fd = new FormData();
+    fd.append('archive', zip);
+    try {
+      toast('Unpacking the sequence…');
+      const updated = await api(`/api/yoyos/${editingId}/spin-archive`, { method: 'POST', body: fd });
+      renderPhotoStrip(updated.photos);
+      updateHero();
+      await loadAll();
+      const spin = updated.photos.find((p) => p.kind === 'spin');
+      toast(`360° spin added${spin ? ` — ${spin.frames.length} frames` : ''}.`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    return;
+  }
+
+  // Sort numerically so spin_2 lands before spin_10 — the order the frames are
+  // sent in is the order the spin rotates.
+  const frames = picked
+    .filter((f) => f.type.startsWith('image/'))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  if (frames.length < 2) { toast('Pick at least 2 frames, or a .zip of the sequence.', 'error'); return; }
+
+  const fd = new FormData();
+  for (const f of frames) fd.append('frames', f);
+  try {
+    toast(`Uploading ${frames.length} frames…`);
+    const updated = await api(`/api/yoyos/${editingId}/spin`, { method: 'POST', body: fd });
+    renderPhotoStrip(updated.photos);
+    updateHero();
+    await loadAll();
+    toast('360 spin added.');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function uploadVideo(file) {
+  if (demoGuard()) return;
+  if (!editingId) { toast('Save the yoyo first, then add a video.', 'error'); return; }
+  if (!file) return;
+
+  const poster = await posterFromVideo(file);
+  if (!poster) { toast('Could not read a frame from that video — try an .mp4 (H.264).', 'error'); return; }
+
+  const fd = new FormData();
+  fd.append('video', file);
+  fd.append('poster', poster, 'poster.jpg');
+  try {
+    const updated = await api(`/api/yoyos/${editingId}/video`, { method: 'POST', body: fd });
+    renderPhotoStrip(updated.photos);
+    updateHero();
+    await loadAll();
+    toast('Video added.');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// Grabs a still out of a video in the browser, so the server needs no decoder
+// (no ffmpeg). Resolves null if the browser can't decode the file.
+function posterFromVideo(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    let settled = false;
+    const done = (blob) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      resolve(blob);
+    };
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+    v.addEventListener('error', () => done(null));
+    v.addEventListener('loadeddata', () => {
+      // Nudge past 0 — plenty of encoders open on a blank or half-decoded frame.
+      v.currentTime = Math.min(0.1, (v.duration || 1) / 10);
+    });
+    v.addEventListener('seeked', () => {
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      if (!c.width || !c.height) return done(null);
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      c.toBlob((b) => done(b), 'image/jpeg', 0.82);
+    }, { once: true });
+    // A codec the browser half-supports can stall without ever firing `error`.
+    setTimeout(() => done(null), 15000);
+  });
+}
+
+const spinInput = $('#spinInput');
+spinInput.addEventListener('change', async () => {
+  await uploadSpin(spinInput.files);
+  spinInput.value = '';
+});
+const videoInput = $('#videoInput');
+videoInput.addEventListener('change', async () => {
+  await uploadVideo(videoInput.files[0]);
+  videoInput.value = '';
+});
+
 async function deletePhoto(photoId) {
   try {
     await api(`/api/photos/${photoId}`, { method: 'DELETE' });
@@ -3992,13 +4119,125 @@ async function deletePhoto(photoId) {
   }
 }
 
+// ---- Media (360 spins, looping video) ----
+// The API hands every gallery entry a still `url`/`thumbUrl` whatever its kind,
+// so list views render plain <img> tags and never know spins or video exist.
+// Only the detail hero and the lightbox call into here.
+
+// A 360 spin: the frames preload, then a horizontal drag maps travel to frame
+// index. Roughly one element-width of drag makes one full rotation.
+function spinHTML(p, cls) {
+  return `<div class="spin-viewer ${cls || ''}" data-spin="${esc(JSON.stringify(p.frames))}"
+      tabindex="0" role="img" aria-label="360-degree view — drag, or use the arrow keys, to rotate">
+      <img src="${esc(p.frames[0])}" alt="" draggable="false" />
+      <span class="spin-badge">360°</span>
+      <span class="spin-hint">Drag to rotate</span>
+    </div>`;
+}
+
+function videoHTML(p, cls) {
+  // muted + playsinline are both required for iOS to autoplay at all.
+  return `<video class="media-video ${cls || ''}" src="${esc(p.videoUrl)}" poster="${esc(p.url)}"
+    autoplay loop muted playsinline preload="metadata"></video>`;
+}
+
+// Interactive rendering of one gallery entry, for the detail hero / lightbox.
+function mediaHTML(p, cls) {
+  if (p.kind === 'spin' && p.frames && p.frames.length > 1) return spinHTML(p, cls);
+  if (p.kind === 'video' && p.videoUrl) return videoHTML(p, cls);
+  return `<img src="${esc(p.thumbUrl || p.url)}" data-full="${esc(p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />`;
+}
+
+// A still with a corner badge, for grid-like strips where a spin or video
+// shouldn't play but should be recognisable as one.
+function mediaStillHTML(p, extra = '') {
+  const badge = p.kind === 'spin' ? `<span class="media-badge">360° · ${p.frames ? p.frames.length : 0}</span>`
+    : p.kind === 'video' ? '<span class="media-badge">Video</span>' : '';
+  return `<img src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(p.url)}'" />${badge}${extra}`;
+}
+
+function wireSpins(root) {
+  root.querySelectorAll('.spin-viewer').forEach((el) => {
+    if (el.dataset.wired) return;
+    el.dataset.wired = '1';
+    let frames;
+    try { frames = JSON.parse(el.dataset.spin); } catch { return; }
+    if (!Array.isArray(frames) || frames.length < 2) return;
+
+    const img = el.querySelector('img');
+    // Warm the cache up front: swapping to an unloaded frame mid-drag is what
+    // makes a spin feel like it's stuttering rather than rotating.
+    frames.forEach((src) => { const pre = new Image(); pre.src = src; });
+
+    let idx = 0, dragging = false, lastX = 0, carry = 0;
+    const show = (i) => {
+      idx = ((i % frames.length) + frames.length) % frames.length;
+      img.src = frames[idx];
+    };
+    // Pixels of drag per frame — a full sweep of the element is one rotation,
+    // floored so a long sequence in a small box still tracks the finger.
+    const pxPerFrame = () => Math.max((el.clientWidth || 320) / frames.length, 3);
+
+    el.addEventListener('pointerdown', (e) => {
+      dragging = true; lastX = e.clientX; carry = 0;
+      el.classList.add('dragging', 'touched');
+      try { el.setPointerCapture(e.pointerId); } catch { /* not captureable */ }
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      carry += e.clientX - lastX;
+      lastX = e.clientX;
+      const stepPx = pxPerFrame();
+      while (Math.abs(carry) >= stepPx) {
+        const dir = carry > 0 ? 1 : -1;
+        show(idx + dir);
+        carry -= dir * stepPx;
+      }
+    });
+    const stop = (e) => {
+      dragging = false;
+      el.classList.remove('dragging');
+      try { el.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    };
+    el.addEventListener('pointerup', stop);
+    el.addEventListener('pointercancel', stop);
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      // The detail modal steps to the previous/next yoyo on arrow keys. While
+      // the spin has focus the arrows mean "rotate", so keep them from bubbling
+      // up and navigating away mid-turn.
+      e.stopPropagation();
+      el.classList.add('touched');
+      show(idx + (e.key === 'ArrowRight' ? 1 : -1));
+    });
+  });
+}
+
 // ---- Lightbox ----
-function openLightbox(url) {
-  $('#lightboxImg').src = url;
+// Accepts a gallery entry (or a bare URL, for the plain-image callers).
+function openLightbox(media) {
+  const item = typeof media === 'string' ? { kind: 'photo', url: media } : media;
+  const body = $('#lightboxBody');
+  body.innerHTML = item.kind === 'spin' && item.frames && item.frames.length > 1
+    ? spinHTML(item, 'spin-lightbox')
+    : item.kind === 'video' && item.videoUrl
+      ? `<video class="media-video" src="${esc(item.videoUrl)}" poster="${esc(item.url)}" autoplay loop muted playsinline controls></video>`
+      : `<img src="${esc(item.url)}" alt="" />`;
+  wireSpins(body);
   $('#lightbox').classList.remove('hidden');
 }
-// Clicking anywhere on the lightbox (including the image) closes it.
-$('#lightbox').addEventListener('click', () => $('#lightbox').classList.add('hidden'));
+function closeLightbox() {
+  $('#lightbox').classList.add('hidden');
+  $('#lightboxBody').innerHTML = ''; // stop playback / release frames
+}
+// Clicking the backdrop closes it — but not a drag that started on a spin or a
+// click on the video's own controls, which would close it out from under you.
+$('#lightbox').addEventListener('click', (e) => {
+  if (e.target.closest('.spin-viewer, video')) return;
+  closeLightbox();
+});
 
 // ---- CSV import ----
 $('#importBtn').addEventListener('click', () => $('#importInput').click());
@@ -4218,7 +4457,7 @@ $('#dataPanel').addEventListener('click', () => $('#dataPanel').classList.add('h
 document.querySelectorAll('[data-close]').forEach((el) =>
   el.addEventListener('click', (e) => {
     if (e.target !== el) return;
-    if (el.closest('#lightbox')) $('#lightbox').classList.add('hidden');
+    if (el.closest('#lightbox')) closeLightbox();
     else if (el.closest('#settingsModal')) closeSettings();
     else if (el.closest('#loginModal')) closeLogin();
     else if (el.closest('#detailModal')) closeDetail();
@@ -4241,7 +4480,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key !== 'Escape') return;
-  if (!$('#lightbox').classList.contains('hidden')) $('#lightbox').classList.add('hidden');
+  if (!$('#lightbox').classList.contains('hidden')) closeLightbox();
   else if (!$('#settingsModal').classList.contains('hidden')) closeSettings();
   else if (!$('#loginModal').classList.contains('hidden')) closeLogin();
   else if (!modal.classList.contains('hidden')) closeModal();

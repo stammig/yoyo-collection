@@ -3,6 +3,98 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-08-19 (2)
+- **Review fixes to the media work below** (found by an adversarial review pass
+  before merge; each was reproduced first, then fixed):
+  - **Loose spin frames now enforce the 5 MB/frame cap.** Multer's `fileSize`
+    limit is per file across all of an uploader's fields, so the shared spin
+    uploader gave loose frames the *archive's* allowance — one request could
+    write up to 180 oversized files where the zip path refused at 5 MB. Frames
+    and archive are now separate endpoints (`/spin`, `/spin-archive`) with
+    separate uploaders, which also makes the frames+archive-together request
+    (whose loose files were silently orphaned) impossible by construction. The
+    archive allowance drops 300 MB → 100 MB — real turntable exports are tens of
+    MB, and adm-zip buffers the whole file in RAM.
+  - **A video transported by sync now gets its poster.** The sync bytes endpoint
+    accepts an optional `poster` part alongside video bytes (mirroring the web
+    upload route), the manifest keeps requesting a video's uuid until both files
+    exist, and until then list views serve a bundled placeholder still instead
+    of the permanent 404 tile they used to show. The bytes-first fallback INSERT
+    also stamps `kind` from the mimetype, so an .mp4 uploaded before its
+    manifest no longer becomes a "photo" rendered as a broken `<img>`.
+  - **`/api/sync/changes` now tells the truth about stills**: each photo entry
+    carries `still_url` (the image to render — a video's poster, the file
+    itself otherwise) and `thumb_url` only for files a thumbnail actually exists
+    for. It used to advertise `thumb-<video>.jpg` and a thumbnail for every spin
+    frame, none of which exist. An explicit manifest `kind` can now also correct
+    an existing row, while manifests from older clients (no `kind`) can no
+    longer flatten a video or spin back to a plain photo.
+  - **Rejected multipart uploads no longer leave files behind** — the error
+    handler removes whatever multer had already written when a later part
+    tripped a limit or filter.
+
+## 2026-08-19
+- **Restore no longer refuses a backup that has columns this version doesn't
+  know** — `insertFrom` filtered the *column list* it built the INSERT from, but
+  still passed the whole backup row as parameters, and a parameter with no
+  placeholder is an error rather than something `node:sqlite` ignores. So
+  restoring a backup written by a newer version failed outright
+  (`Unknown named parameter 'kind'`) instead of dropping the one column it
+  couldn't map. The surrounding transaction rolls back, so no collection was
+  ever lost — the restore was simply refused. Now only known columns are bound.
+  (`db.js` carried a comment claiming extra keys are ignored; the API that would
+  do that, `setAllowUnknownNamedParameters`, isn't present on the Node versions
+  this app supports, so the optional-call silently does nothing. Comment
+  corrected — this is what made the assumption look safe.)
+- **Two fixes to the 360°/video media work below** —
+  - `/api/sync/changes` was sending each photo without its `kind` or
+    `group_uuid`, so a sync client would have rendered a 360 spin as N loose
+    frames and pushed back a manifest that flattened it permanently. Both
+    fields now ride along with every photo in the change feed.
+  - Soft-deleting a yoyo freed its photo files and thumbnails but not a looping
+    video's poster still (or that poster's thumbnail), leaving them orphaned in
+    `uploads/`. Both tombstone paths — `DELETE /api/yoyos/:id` and a delete
+    arriving via sync push — now go through `mediaFilesFor`, so every file a row
+    owns is removed whatever its kind.
+
+## 2026-08-21
+- **`spin-frames.sh` + SPIN-FRAMES.md** — a companion script (runs on your own
+  machine, not the server) that turns turntable videos into ready-to-upload
+  360° spins: it auto-detects the in-point (when your hand leaves the shot,
+  via ffmpeg signalstats) and the rotation period (SSIM against a reference
+  frame, earliest peak = one full turn), then emits the frame sequence, a
+  zip of it, and a muted H.264 loop. Takes single files or whole folders;
+  `-p` skips detection when the turntable's period is known. Only needs
+  ffmpeg/ffprobe/zip. Field-tested on GoPro footage of both fast (~31s) and
+  slow (~62s) turntable modes, including the mirror-side half-rotation trap
+  the doc explains.
+
+## 2026-08-18
+- **360° spins and looping video** — a yoyo's gallery can now hold more than
+  stills. **Add 360° spin** takes a numbered frame sequence and renders a
+  drag-to-rotate viewer (pointer, touch, and ← / → keys); **Add video** takes a
+  short `.mp4`/`.webm` that autoplays muted on loop. Either can be dragged to
+  the front to become the cover.
+  - A spin can be handed over as loose frames **or as a single `.zip`**, which
+    the server unpacks (frames nested in a folder are fine). Archive members are
+    identified by magic bytes and re-named on the way in, and their paths are
+    ignored entirely, so a crafted entry name can't write outside `uploads/`.
+    Uses the existing `adm-zip` dependency.
+  - No new dependencies, and **no ffmpeg** — spins arrive as already-extracted
+    frames, and the browser reads a video's poster frame out via canvas before
+    upload, so the server never decodes anything.
+  - `photos` gains `kind` (`photo`/`video`/`spin`) and `group_uuid`; a spin is
+    one row per frame sharing a group, which the API collapses back into a
+    single gallery entry. Existing rows migrate to `kind = 'photo'` with no data
+    pass, and one-row-per-file means backup/restore and the sync photo manifest
+    needed no special cases.
+  - Every gallery entry's `url`/`thumbUrl` still points at a still image
+    whatever its kind, so tiles, rows, For Sale, Arrivals and Insights render
+    unchanged and a big collection loads no slower. Only the detail view and the
+    lightbox animate.
+  - Deleting a spin removes its whole frame sequence, and reordering keeps a
+    spin's frames contiguous and in sequence.
+
 ## 2026-08-02 (3)
 - **Dependency security updates (Dependabot)** — patched six advisories by
   bumping: **multer** → 2.2.0 (DoS via deeply nested field names; incomplete

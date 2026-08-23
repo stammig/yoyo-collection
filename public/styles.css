@@ -1032,7 +1032,50 @@ body.read-only .card-actions { display: none; }
    Lightbox
    ============================================================ */
 .lightbox { position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,0.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
-.lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
+.lightbox-body { display: flex; align-items: center; justify-content: center; }
+.lightbox img, .lightbox video { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
+/* The spin is draggable, so it keeps the grab cursor instead of the
+   backdrop's zoom-out — and it must not inherit `cursor: zoom-out`. */
+.lightbox .spin-viewer { width: min(92vw, 92vh); height: min(92vw, 92vh); border-radius: 8px; }
+
+/* ============================================================
+   Media: 360 spins + looping video
+   ============================================================ */
+.spin-viewer { position: relative; overflow: hidden; cursor: grab; user-select: none;
+  /* Claim horizontal drags for rotation but leave vertical scrolling to the
+     page, so the viewer doesn't trap a scroll gesture on a phone. */
+  touch-action: pan-y; background: var(--surface-2); }
+.spin-viewer.dragging { cursor: grabbing; }
+.spin-viewer img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; -webkit-user-drag: none; user-select: none; }
+.spin-viewer:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.spin-badge { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.6); color: #fff;
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 999px; pointer-events: none; }
+.spin-hint { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.55); color: #fff;
+  font-size: 0.62rem; text-align: center; padding: 3px; pointer-events: none; transition: opacity 0.2s ease; }
+/* Once they've worked out that it drags, stop telling them. */
+.spin-viewer.touched .spin-hint { opacity: 0; }
+.media-video { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--surface-2); }
+/* Corner tag on the stills that stand in for a spin/video in strips. */
+.media-badge { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.6); color: #fff;
+  font-size: 0.58rem; font-weight: 600; letter-spacing: 0.03em; padding: 2px 5px; border-radius: 999px; pointer-events: none; }
+/* The lead media grows when it's interactive — a 360 is unusable at thumbnail size. */
+.detail-hero-media.motion { width: 220px; height: 220px; cursor: default; }
+.gallery-item { position: relative; padding: 0; border: 1px solid var(--border); background: none;
+  border-radius: 10px; overflow: hidden; cursor: zoom-in; line-height: 0; }
+.gallery-item img { width: 124px; height: 124px; object-fit: cover; display: block; }
+
+/* Secondary "add 360 / add video" pickers under the photo dropzone. */
+.media-adds { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.media-add { display: flex; align-items: center; gap: 10px; flex: 1 1 180px; padding: 10px 12px;
+  border: 1.5px dashed var(--border); border-radius: var(--radius); cursor: pointer; color: var(--muted);
+  font-size: 0.78rem; transition: border-color 0.1s ease, background 0.1s ease; }
+.media-add:hover { border-color: var(--accent); }
+.media-add svg { width: 20px; height: 20px; flex: none; }
+.media-add small { opacity: 0.75; }
+
+@media (max-width: 560px) {
+  .detail-hero-media.motion { width: 100%; height: auto; aspect-ratio: 1; }
+}
 
 /* ============================================================
    For Sale view + card sale tags

@@ -27,6 +27,11 @@ anything.
   who you bought from / sold to). Private fields stay hidden from public viewers.
 - **Photos** — multiple per yoyo, drag-to-reorder, auto-thumbnailed, with a
   click-to-zoom viewer.
+- **360° spins and video** — show a throw off in motion: upload a numbered frame
+  sequence for a drag-to-rotate 360, or a short looping `.mp4`/`.webm`. Both sit
+  in the gallery alongside photos and can be made the cover. List views keep
+  showing a still, so the grid stays fast. No ffmpeg needed — see
+  [360° spins and video](#360-spins-and-video).
 - **For Sale page** — a public, shareable page for the throws you're selling or
   trading, with prices, status badges, and your own shipping/sale notes.
 - **Sharing** — share any single yoyo as its own link (it shows the photo and key
@@ -168,6 +173,53 @@ and your choices are remembered in the browser.
 - **Fields ▾** — choose which fields show (Brand and Model are always shown).
 - **Per page** — 12 / 24 / 48 / 96 / All.
 
+## 360° spins and video
+Two ways to show a throw in motion, both added from the **Photos** section of
+the add/edit form. They sit in the gallery next to your photos — drag either one
+to the front to make it the cover.
+
+The server never decodes video, so there's **no ffmpeg to install** and nothing
+extra to run on a NAS or SBC.
+
+### 360° spin (drag to rotate)
+Shoot a full rotation on a turntable and export it as a **numbered image
+sequence**, then use **Add 360° spin** — either pick all the frames at once, or
+hand it a single **`.zip`** of them and the server unpacks it for you (frames in
+a subfolder are fine, so zipping the export folder just works). Frames are
+ordered numerically either way, so `spin_2.jpg` correctly lands before
+`spin_10.jpg`.
+
+- 24-72 frames is the usual range (36 is a good default — 10° per frame).
+- Export around 800-1200px; every frame is downloaded to rotate the spin.
+- Lock the camera and use a plain backdrop — rotate only the yoyo.
+- Drop the duplicate final frame; a full turn ends where it started, and keeping
+  both makes the loop stutter.
+
+If you have a video instead of frames, the bundled
+[`spin-frames.sh`](SPIN-FRAMES.md) does the whole job — it detects where your
+hand leaves the shot and how long one turntable rotation takes, then emits the
+frames, a ready-to-upload zip, and a loop `.mp4`, for one clip or a folder of
+them. Rotate the result by dragging, or with the ← / → keys when it has focus.
+
+### Looping video
+**Add video** takes a short `.mp4` or `.webm` (up to 50 MB). It autoplays,
+loops, and is muted — audio is never played. Your browser grabs the poster frame
+as it uploads, so list views draw a still rather than pulling the video.
+
+**H.264 in an .mp4** is the safe choice — it plays everywhere. A 5-second
+1080×1080 spin lands around 400-800 KB:
+```bash
+ffmpeg -i spin.mov -an -c:v libx264 -preset veryslow -crf 24 \
+  -pix_fmt yuv420p -vf "fps=30,scale=1080:-2" -movflags +faststart spin.mp4
+```
+`-an` drops the audio track, `-pix_fmt yuv420p` keeps Safari happy, and
+`+faststart` lets playback begin before the file finishes downloading.
+
+### Where motion plays
+Only the **detail view** and the **zoom lightbox** animate. Tiles, rows, For
+Sale, Arrivals and Insights all keep showing a still, so a big collection loads
+at exactly the speed it did before.
+
 ## CSV import / export
 Use **⤓ Export CSV** / **⤴ Import CSV** in the toolbar. Columns:
 ```
@@ -185,6 +237,11 @@ updated (so re-importing an export won't duplicate). Photos aren't imported.
 Handy if you want to script against it (subject to the access mode above):
 - `GET/POST /api/yoyos`, `GET/PUT/DELETE /api/yoyos/:id`
 - `POST /api/yoyos/:id/photos`, `DELETE /api/photos/:photoId`
+  (deleting a spin removes the whole frame sequence)
+- `POST /api/yoyos/:id/spin` — multipart `frames` (2-180 images, 5 MB each);
+  `POST /api/yoyos/:id/spin-archive` — one `.zip` of the sequence. Either
+  produces one 360° spin
+- `POST /api/yoyos/:id/video` — multipart `video` + `poster` (both required)
 - `POST /api/track` — carrier ETA look-up (needs carrier creds)
 - `GET /api/stats`, `GET /api/config`
 - `GET /api/backup.zip`, `POST /api/restore`
