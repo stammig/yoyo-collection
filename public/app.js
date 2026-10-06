@@ -396,7 +396,7 @@ const DATALIST_FIELD = {
 };
 const DATALIST_SEEDS = {
   compositionList: ['BI', 'MN', 'TRI'],
-  conditionList: ['MiB', 'NMBTS', 'Used', 'Beat'],
+  conditionList: ['MiB', 'NMTBS', 'Used', 'Beat'],
   bearingList: ['Size C', 'Size D'],
   finishList: ['Blasted', 'Polished', 'Pyramatte', 'Matte', 'Satin', 'Raw'],
   shapeList: ['Organic', 'H-Shape', 'V-Shape', 'W-Shape', 'Step Round'],
@@ -1193,7 +1193,7 @@ function buildViewsPanel(page) {
   });
 }
 async function saveCurrentLedgerView(page) {
-  const name = await promptDialog({ title: 'Save view', placeholder: 'e.g. Bi-metals by weight', confirmText: 'Save' });
+  const name = await promptDialog({ title: 'Save view', placeholder: 'e.g. Bi-materials by weight', confirmText: 'Save' });
   if (!name) return;
   savedViews[page].push({ name: name.trim(), state: LEDGER_PAGES[page].capture() });
   saveSavedViews();
@@ -1361,7 +1361,7 @@ const BULK_FIELDS = [
   { key: 'favorite', label: 'Favorite', type: 'bool' },
   { key: 'retired', label: 'Retired', type: 'bool' },
   { key: 'composition', label: 'Composition', type: 'select', seeds: ['BI', 'MN', 'TRI'] },
-  { key: 'condition', label: 'Condition', type: 'select', seeds: ['MiB', 'NMBTS', 'Used', 'Beat'] },
+  { key: 'condition', label: 'Condition', type: 'select', seeds: ['MiB', 'NMTBS', 'Used', 'Beat'] },
   { key: 'bearing_size', label: 'Bearing', type: 'select', seeds: ['Size C', 'Size D'] },
   { key: 'sale_status', label: 'Sale status', type: 'select', seeds: ['For Sale', 'For Trade', 'For Sale or Trade', 'Sold'] },
 ];
@@ -1585,7 +1585,7 @@ function promptDialog({ title = '', placeholder = '', confirmText = 'Save', valu
 let listEditMode = false;
 const INLINE_SELECTS = {
   composition: ['BI', 'MN', 'TRI'],
-  condition: ['MiB', 'NMBTS', 'Used', 'Beat'],
+  condition: ['MiB', 'NMTBS', 'Used', 'Beat'],
   bearing_size: ['Size C', 'Size D'],
   sale_status: ['Not listed', 'For Sale', 'For Trade', 'For Sale or Trade', 'Sold'],
 };
@@ -2879,10 +2879,10 @@ function spendByBrand(n) {
   for (const y of yoyos) { if (y.paid == null || !y.brand) continue; m[y.brand] = (m[y.brand] || 0) + y.paid; }
   return Object.entries(m).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount).slice(0, n);
 }
-// Yoyo counts by composition (bi/mono/tri-metal) across the owned collection,
-// omitting compositions with none.
+// Yoyo counts by composition (mono/bi/tri-material) across the owned
+// collection, omitting compositions with none.
 function compositionTally() {
-  const labels = { BI: 'Bi-metal', MN: 'Mono-metal', TRI: 'Tri-metal' };
+  const labels = { BI: 'Bi-material', MN: 'Mono-material', TRI: 'Tri-material' };
   const owned = ownedYoyos();
   return ['BI', 'MN', 'TRI'].map((c) => ({ name: labels[c], count: owned.filter((y) => y.composition === c).length })).filter((t) => t.count > 0);
 }

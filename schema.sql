@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS yoyos (
 
   -- Status
   in_hand         INTEGER NOT NULL DEFAULT 0, -- 1 = in hand, 0 = on order / wishlist
-  condition       TEXT NOT NULL DEFAULT '',   -- MiB / NMBTS / Used / Beat
+  condition       TEXT NOT NULL DEFAULT '',   -- MiB / NMTBS / Used / Beat
 
   -- Pricing  (percent_off is computed from these, not stored)
   retail          REAL,

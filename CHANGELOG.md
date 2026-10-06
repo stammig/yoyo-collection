@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
 ## 2026-10-05
+- **Condition is spelled NMTBS everywhere** ("Near Mint To Be Safe"). The old
+  misspelling NMBTS kept coming back from CSVs, backups and synced devices. Every
+  write path (form, CSV import, restore, sync push) now converts NMBTS to NMTBS.
+  Existing rows are fixed once at startup, and their rev is bumped so synced
+  devices pull the corrected value.
+- **Composition labels are Mono-material / Bi-material / Tri-material.** The
+  stored codes stay MN / BI / TRI. Free-text values such as "Plastic",
+  "Bi-metal" or "mono-material" are mapped to the matching code.
 - **Tests** — `npm test` (Node's built-in runner, no new dependencies), run in
   CI on Node 22.13 and 24 for every push and PR. Covers owner-only fields never
   reaching logged-out visitors, CSV import matching and round trips, date

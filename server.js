@@ -18,6 +18,7 @@ import { parse } from 'csv-parse/sync';
 import archiver from 'archiver';
 import { track as trackPackage, configuredCarriers } from './carriers.js';
 import { DAY_FIELDS, normalizeDay, localDayStamp } from './dates.js';
+import { canonicalCondition, canonicalComposition } from './vocab.js';
 import { listEntries, extractEntry } from './unzip.js';
 import db, { DB_PATH, openDatabase, backfillUuids, backfillPhotoUuids, nextRev } from './db.js';
 
@@ -445,6 +446,8 @@ function sanitizeYoyo(body) {
   const out = {};
   for (const f of TEXT_FIELDS) out[f] = body[f] == null ? '' : String(body[f]).trim();
   for (const f of DAY_FIELDS) out[f] = normalizeDay(out[f]);
+  out.condition = canonicalCondition(out.condition);
+  out.composition = canonicalComposition(out.composition);
   for (const f of NUMBER_FIELDS) out[f] = toNumber(body[f]);
   for (const f of BOOL_FIELDS) out[f] = body[f] ? 1 : 0;
   return out;

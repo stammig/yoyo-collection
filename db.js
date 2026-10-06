@@ -6,6 +6,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { canonicalCondition, canonicalComposition } from './vocab.js';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -156,6 +157,23 @@ if (!photoCols.includes('uuid')) {
   db.exec('ALTER TABLE photos ADD COLUMN uuid TEXT');
 }
 backfillPhotoUuids(db);
+
+// Rewrite retired vocabulary in place (NMBTS -> NMTBS, "Plastic" -> MN; see
+// vocab.js). Idempotent: once clean, the WHERE matches nothing. Each changed
+// row gets a new rev so sync clients pull the corrected value.
+{
+  const stale = db.prepare(
+    `SELECT id, condition, composition FROM yoyos
+     WHERE upper(trim(condition)) = 'NMBTS' OR lower(trim(composition)) IN ('plastic','mono-material','bi-material','tri-material','mono-metal','bi-metal','tri-metal','mn','bi','tri') AND composition NOT IN ('MN','BI','TRI')`
+  ).all();
+  if (stale.length) {
+    const fix = db.prepare('UPDATE yoyos SET condition = ?, composition = ?, rev = ? WHERE id = ?');
+    db.transaction(() => {
+      for (const r of stale) fix.run(canonicalCondition(r.condition), canonicalComposition(r.composition), nextRev(db), r.id);
+    })();
+    console.log(`vocab: normalized ${stale.length} yoyo(s) (NMBTS -> NMTBS / composition codes)`);
+  }
+}
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_uuid ON photos(uuid)');
 
 // Assign a UUID to every photo that lacks one. Exported so the restore endpoint

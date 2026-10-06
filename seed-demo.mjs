@@ -19,7 +19,7 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const YOYOS = [
   { brand: 'CLYW', model: 'Peak 2', color: 'Bloodcell', composition: 'MN', body_material: '6061 AL',
     bearing_size: 'Size C', response_type: 'CLYW Snow Tire', weight_g: 63.9, diameter_mm: 54.55, width_mm: 42.5, gap_mm: 4.6,
-    condition: 'NMBTS', retail: 99.99, paid: 99.99, release_date: '2017', favorite: 1, in_hand: 1,
+    condition: 'NMTBS', retail: 99.99, paid: 99.99, release_date: '2017', favorite: 1, in_hand: 1,
     description: 'The return of a legend — a modern take on the original Peak.' },
 
   { brand: 'CLYW', model: 'Akita 2025', color: 'Liquid Gold', composition: 'MN', body_material: '6061 AL',
@@ -29,7 +29,7 @@ const YOYOS = [
   { brand: 'Atmos', model: 'Ekta', color: 'Galaxy', composition: 'BI', body_material: '7068 AL, SS',
     bearing_size: 'Size C', response_type: '19mm Pads', weight_g: 67.3, diameter_mm: 58, width_mm: 48, gap_mm: 4.5,
     condition: 'MiB', retail: 199, paid: 185, release_date: '2023', in_hand: 1,
-    description: 'Bi-metal designed by Evgeniy Kochergin — fast and stable.',
+    description: 'Bi-material yoyo designed by Evgeniy Kochergin — fast and stable.',
     sale_status: 'For Sale or Trade', sale_price: 180 },
 
   { brand: 'Good Life', model: 'Zen', color: 'Seafoam', composition: 'MN', body_material: '6061 AL',
@@ -38,7 +38,7 @@ const YOYOS = [
 
   { brand: 'Edition', model: 'Forma', color: 'Silver', composition: 'MN', body_material: '6061 AL',
     bearing_size: 'Size C', response_type: '19mm Slim Pad', weight_g: 65.9, diameter_mm: 56, width_mm: 46,
-    condition: 'NMBTS', retail: 60, paid: 60, release_date: '2024', in_hand: 1 },
+    condition: 'NMTBS', retail: 60, paid: 60, release_date: '2024', in_hand: 1 },
 
   { brand: 'G2', model: 'Council', color: 'Stone', composition: 'BI', body_material: '6061 AL, SS',
     bearing_size: 'Size C', response_type: '19mm Pads', weight_g: 65.3, diameter_mm: 56.65, width_mm: 48.5,
@@ -58,7 +58,7 @@ const YOYOS = [
   // ---- on order (shows on Arrivals; pricing + tracking hidden in public view) ----
   { brand: 'One Drop', model: 'Kuntosh', color: 'Acid Wash', composition: 'MN', body_material: '7075 AL',
     bearing_size: 'Size C', response_type: 'One Drop Flow Groove', weight_g: 66.3, diameter_mm: 55.9, width_mm: 45.6, gap_mm: 4.32,
-    condition: 'NMBTS', retail: 95, paid: 95, release_date: '2020', in_hand: 0,
+    condition: 'NMTBS', retail: 95, paid: 95, release_date: '2020', in_hand: 0,
     tracking: '1Z999AA10123456784', eta: '2026-07-08' },
 
   { brand: 'CLYW', model: 'Kodiak', color: 'Northern Lights', composition: 'MN', body_material: '6061 AL',
