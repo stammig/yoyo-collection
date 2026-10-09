@@ -11,6 +11,16 @@ changes app behavior gets an entry — newest first.
   puts the cursor in Color. Condition, photos, edition, serial number, and
   purchase, sale and shipping details start blank. The native apps have the
   same action.
+## 2026-10-09
+- **The 360° spin `.zip` upload now unpacks through `unzip.js`**, the streaming
+  reader restore moved to, instead of adm-zip (which main no longer ships).
+  Only one frame is in flight at a time and the archive is never read into
+  memory. The checks are unchanged: frame count, the declared per-frame and
+  total sizes, magic-byte sniffing, and generated names. `extractEntry` gains
+  an optional `maxBytes` that the spin path sets to each frame's declared size,
+  so an entry whose header understates what it inflates to is stopped there
+  rather than trusted. Restore doesn't pass it and behaves exactly as before.
+
 ## 2026-08-19 (2)
 - **Review fixes to the media work below** (found by an adversarial review pass
   before merge; each was reproduced first, then fixed):
@@ -22,7 +32,7 @@ changes app behavior gets an entry — newest first.
     separate uploaders, which also makes the frames+archive-together request
     (whose loose files were silently orphaned) impossible by construction. The
     archive allowance drops 300 MB → 100 MB — real turntable exports are tens of
-    MB, and adm-zip buffers the whole file in RAM.
+    MB.
   - **A video transported by sync now gets its poster.** The sync bytes endpoint
     accepts an optional `poster` part alongside video bytes (mirroring the web
     upload route), the manifest keeps requesting a video's uuid until both files
@@ -75,7 +85,6 @@ changes app behavior gets an entry — newest first.
     the server unpacks (frames nested in a folder are fine). Archive members are
     identified by magic bytes and re-named on the way in, and their paths are
     ignored entirely, so a crafted entry name can't write outside `uploads/`.
-    Uses the existing `adm-zip` dependency.
   - No new dependencies, and **no ffmpeg** — spins arrive as already-extracted
     frames, and the browser reads a video's poster frame out via canvas before
     upload, so the server never decodes anything.

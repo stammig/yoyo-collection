@@ -329,9 +329,9 @@ const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
 const MAX_SPIN_FRAMES = 180;
 const MAX_SPIN_FRAME_BYTES = 5 * 1024 * 1024;
 // Ceiling on the archive itself and on what it may expand to (checked against
-// the zip's declared sizes before anything is written). Frames are already-
-// compressed images, so compressed ~ expanded; adm-zip buffers the whole file
-// in RAM, which is the other reason to keep this far below "generous".
+// the zip's declared sizes before anything is written, and enforced while each
+// frame inflates). Frames are already-compressed images, so compressed ~
+// expanded.
 const MAX_SPIN_ARCHIVE_BYTES = 100 * 1024 * 1024;
 // Browsers disagree on the mimetype for .zip (Windows reports x-zip-compressed,
 // and some report nothing useful at all), so accept the spellings and let the
@@ -1037,48 +1037,61 @@ function sniffImageExt(buf) {
 
 // Unpacks a zip of spin frames into UPLOAD_DIR and returns them in frame order,
 // shaped like multer's file objects so the caller can't tell the two paths apart.
+// Streams through unzip.js, the same reader restore uses, so only one frame is
+// ever in flight and the archive is never held in memory.
 //
 // Nothing from inside the archive reaches the filesystem: names are generated,
 // entry paths are ignored entirely (so a `../../etc/passwd` member is just
 // another image), and members are identified by magic bytes.
-function extractSpinArchive(zipPath) {
+async function extractSpinArchive(zipPath) {
   let entries;
-  try { entries = new AdmZip(zipPath).getEntries(); }
+  try { entries = listEntries(zipPath); }
   catch { throw new Error('That file is not a readable .zip.'); }
 
   const members = entries
     .filter((e) => !e.isDirectory)
     // Skip the metadata folders macOS adds when you right-click → Compress, and
     // any dotfile — otherwise ._spin_01.jpg doubles every frame.
-    .filter((e) => !e.entryName.split('/').some((seg) => seg === '__MACOSX' || seg.startsWith('.')))
-    .sort((a, b) => path.basename(a.entryName).localeCompare(path.basename(b.entryName), undefined, { numeric: true, sensitivity: 'base' }));
+    .filter((e) => !e.name.split('/').some((seg) => seg === '__MACOSX' || seg.startsWith('.')))
+    .sort((a, b) => path.basename(a.name).localeCompare(path.basename(b.name), undefined, { numeric: true, sensitivity: 'base' }));
 
   if (members.length > MAX_SPIN_FRAMES) {
     throw new Error(`That archive holds ${members.length} files — the limit is ${MAX_SPIN_FRAMES} frames.`);
   }
   // Check the declared sizes before writing anything, so a zip bomb is refused
-  // rather than half-extracted.
+  // rather than half-extracted. extractEntry's maxBytes then holds each frame to
+  // the size it declared, so a member that lies about it can't get past this.
   let declared = 0;
   for (const e of members) {
-    if (e.header.size > MAX_SPIN_FRAME_BYTES) throw new Error('A frame in that archive is larger than 5 MB.');
-    declared += e.header.size;
+    if (e.size > MAX_SPIN_FRAME_BYTES) throw new Error('A frame in that archive is larger than 5 MB.');
+    declared += e.size;
   }
   if (declared > MAX_SPIN_ARCHIVE_BYTES) {
     throw new Error(`That archive expands to more than ${Math.round(MAX_SPIN_ARCHIVE_BYTES / 1048576)} MB.`);
   }
 
   const written = [];
+  let part = null;
   try {
     for (const e of members) {
-      const data = e.getData();
-      const ext = sniffImageExt(data);
-      if (!ext) continue; // not an image — a stray readme, say
+      // Inflate under a neutral name, then sniff the bytes to decide whether it
+      // becomes a frame (renamed with its real extension) or is dropped.
+      part = path.join(UPLOAD_DIR, tempName('.part'));
+      try { await extractEntry(zipPath, e, part, { maxBytes: e.size }); }
+      catch { throw new Error('A frame in that archive could not be unpacked.'); }
+      const head = Buffer.alloc(12);
+      const fd = fs.openSync(part, 'r');
+      try { fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+      const ext = sniffImageExt(head);
+      if (!ext) { fs.rmSync(part, { force: true }); part = null; continue; } // not an image — a stray readme, say
       const filename = tempName(ext);
-      fs.writeFileSync(path.join(UPLOAD_DIR, filename), data);
-      written.push({ filename, originalname: path.basename(e.entryName) });
+      fs.renameSync(part, path.join(UPLOAD_DIR, filename));
+      part = null;
+      written.push({ filename, originalname: path.basename(e.name) });
     }
   } catch (err) {
     // Don't leave a partial sequence behind if one member fails to inflate.
+    if (part) fs.rmSync(part, { force: true });
     for (const f of written) fs.rmSync(path.join(UPLOAD_DIR, f.filename), { force: true });
     throw err;
   }
@@ -1135,7 +1148,7 @@ app.post('/api/yoyos/:id/spin-archive', uploadSpinArchive.single('archive'), asy
 
   let files;
   try {
-    files = extractSpinArchive(path.join(UPLOAD_DIR, archive.filename));
+    files = await extractSpinArchive(path.join(UPLOAD_DIR, archive.filename));
   } catch (err) {
     dropArchive();
     return res.status(400).json({ error: err.message });
