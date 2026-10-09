@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <!-- Placeholder still for a synced video whose poster hasn't arrived yet. -->
+  <rect width="240" height="240" fill="#e8e6e1"/>
+  <circle cx="120" cy="112" r="34" fill="#ffffff"/>
+  <path d="M110 96v32l26-16z" fill="#8a877f"/>
+  <text x="120" y="182" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#8a877f">video</text>
+</svg>

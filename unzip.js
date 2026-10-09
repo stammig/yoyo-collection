@@ -1,13 +1,14 @@
-// Minimal streaming zip reader for restore. A backup holds every photo, so it
-// can be well over a gigabyte; adm-zip reads the whole archive into one Buffer,
-// which is more memory than a NAS, an SBC, or a shared host will give one
-// process. This reads only the central directory up front and inflates each
-// entry from disk straight into its destination file.
+// Minimal streaming zip reader for restore and the 360-spin .zip upload. A
+// backup holds every photo, so it can be well over a gigabyte; adm-zip reads the
+// whole archive into one Buffer, which is more memory than a NAS, an SBC, or a
+// shared host will give one process. This reads only the central directory up
+// front and inflates each entry from disk straight into its destination file.
 //
 // Handles what our backups (and the native apps' exports) contain: stored or
 // deflated entries, with Zip64 sizes/offsets for archives past 4GB.
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 const EOCD_SIG = 0x06054b50;
@@ -91,7 +92,13 @@ export function listEntries(zipPath) {
 }
 
 // Writes one entry's contents to `destPath`, streaming from disk.
-export async function extractEntry(zipPath, entry, destPath) {
+//
+// `maxBytes` caps what the entry may write. The sizes listEntries() reports are
+// whatever the archive claims, and inflate keeps going past a false one, so a
+// caller unpacking an untrusted upload passes it to make the size it checked
+// binding. Past the cap the extraction fails, leaving a partial file at
+// `destPath` for the caller to remove.
+export async function extractEntry(zipPath, entry, destPath, { maxBytes = Infinity } = {}) {
   if (entry.encrypted) throw new Error(`${entry.name} is encrypted`);
   if (entry.method !== 0 && entry.method !== 8) throw new Error(`${entry.name} uses an unsupported compression method`);
   // The local header's name/extra lengths can differ from the central copy's,
@@ -108,6 +115,15 @@ export async function extractEntry(zipPath, entry, destPath) {
   const out = fs.createWriteStream(destPath);
   if (entry.compressedSize === 0) { out.end(); await new Promise((r, j) => out.on('finish', r).on('error', j)); return; }
   const src = fs.createReadStream(zipPath, { start: dataStart, end: dataStart + entry.compressedSize - 1 });
-  if (entry.method === 0) await pipeline(src, out);
-  else await pipeline(src, zlib.createInflateRaw(), out);
+  const stages = entry.method === 0 ? [src] : [src, zlib.createInflateRaw()];
+  if (Number.isFinite(maxBytes)) {
+    let seen = 0;
+    stages.push(new Transform({
+      transform(chunk, _enc, cb) {
+        seen += chunk.length;
+        cb(seen > maxBytes ? new Error(`${entry.name} is larger than it claims`) : null, chunk);
+      },
+    }));
+  }
+  await pipeline(...stages, out);
 }
