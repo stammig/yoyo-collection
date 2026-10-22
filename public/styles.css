@@ -1217,7 +1217,8 @@ body.read-only #bandwidthAdmin { display: none !important; }
 /* Public viewers can't edit or delete — hide the detail-modal owner actions
    (the API rejects the writes anyway, so showing them was just misleading). */
 body.read-only #detailDelete,
-body.read-only #detailEdit { display: none; }
+body.read-only #detailEdit,
+body.read-only #detailColorway { display: none; }
 
 /* Share view (arrived via /y/:id): present the single yoyo as its own page —
    no dimmed backdrop, nothing behind — rather than a dialog over the collection.
@@ -1230,6 +1231,7 @@ body.share-mode #detailModal .modal-backdrop { display: none; }
    even when the owner opens their own link while logged in. Hides the footer
    Edit/Delete and the in-hero quick actions (Favorite / In hand / Edit …). */
 body.share-mode #detailEdit,
+body.share-mode #detailColorway,
 body.share-mode #detailDelete,
 body.share-mode .detail-hero-actions { display: none; }
 

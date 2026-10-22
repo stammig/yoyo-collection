@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-10-22
+- **New colorway.** Use the button in a yoyo's detail sheet, or "New
+  colorway…" in its right-click menu, to open the Add form pre-filled from
+  that model. It copies brand, model, materials, specs, shape, finish,
+  signature, retail price, retired status, release date and description, and
+  puts the cursor in Color. Condition, photos, edition, serial number, and
+  purchase, sale and shipping details start blank. The native apps have the
+  same action.
+
 ## 2026-10-05
 - **Condition is spelled NMTBS everywhere** ("Near Mint To Be Safe"). The old
   misspelling NMBTS kept coming back from CSVs, backups and synced devices. Every
