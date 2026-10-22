@@ -109,6 +109,7 @@ function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'C
 const SVG = {
   star: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" /></svg>',
   starOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" /></svg>',
+  copyPlus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 12v6" /><path d="M12 15h6" /><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /> <path d="m15 5 4 4" /></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>',
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" /> <path d="M12 22V12" /> <polyline points="3.29 7 12 12 20.71 7" /> <path d="m7.5 4.27 9 5.15" /></svg>',
@@ -1302,6 +1303,7 @@ function showCardMenu(e, id) {
     `<button data-act="inhand">${SVG.box}<span>${y.in_hand ? 'Mark on order' : 'Mark in hand'}</span></button>` +
     `<button data-act="retired">${SVG.check}<span>${y.retired ? 'Unmark retired' : 'Mark retired'}</span></button>` +
     `<button data-act="edit">${SVG.edit}<span>Edit…</span></button>` +
+    `<button data-act="colorway">${SVG.copyPlus}<span>New colorway…</span></button>` +
     `<div class="cm-sep"></div>` +
     `<button class="danger" data-act="del">${SVG.trash}<span>Delete</span></button>`;
   document.body.appendChild(menu);
@@ -1315,6 +1317,7 @@ function showCardMenu(e, id) {
   menu.querySelector('[data-act="inhand"]').onclick = () => quick({ in_hand: !y.in_hand });
   menu.querySelector('[data-act="retired"]').onclick = () => quick({ retired: !y.retired });
   menu.querySelector('[data-act="edit"]').onclick = () => { dismissCardMenu(); openEdit(id); };
+  menu.querySelector('[data-act="colorway"]').onclick = () => { dismissCardMenu(); openColorway(id); };
   menu.querySelector('[data-act="del"]').onclick = () => { dismissCardMenu(); deleteYoyoQuick(id); };
 }
 
@@ -3256,6 +3259,7 @@ $('#detailPrev').addEventListener('click', () => detailStep(-1));
 $('#detailNext').addEventListener('click', () => detailStep(1));
 
 $('#detailEdit').addEventListener('click', () => { if (detailId) openEdit(detailId, true); });
+$('#detailColorway').addEventListener('click', () => { if (detailId) openColorway(detailId); });
 $('#detailDelete').addEventListener('click', async () => {
   if (!detailId) return;
   if (demoGuard()) return;
@@ -3647,6 +3651,40 @@ function openAdd() {
   setSaleType('cash');
   updateHero();
   showModal();
+}
+
+// The fields that describe the MODEL rather than one particular throw: what a
+// new colorway of it shares. Color, condition, photos, edition, serial,
+// purchase, sale and shipping fields stay blank, since copying those would
+// record a purchase or listing that never happened. Keep in step with
+// Yoyo.newColorway() in the native app.
+const COLORWAY_FIELDS = ['brand', 'model', 'body_material', 'composition', 'weight_g', 'diameter_mm',
+  'width_mm', 'gap_mm', 'bearing_size', 'response_type', 'finish', 'shape', 'signature', 'retail',
+  'retired', 'description', 'release_date'];
+
+// Opens the Add form pre-filled from an existing yoyo's model, for logging
+// another colorway of it. Nothing is saved until Add, and it's a plain POST,
+// so the new yoyo gets its own id and uuid.
+function openColorway(id) {
+  const y = yoyos.find((x) => x.id === id);
+  if (!y) return;
+  openAdd();
+  $('#detailModal').classList.add('hidden');
+  $('#modalTitle').textContent = 'New colorway';
+  for (const k of COLORWAY_FIELDS) {
+    const field = form.elements[k];
+    const v = y[k];
+    if (!field || field.tagName === undefined || v == null || v === '') continue;
+    if (field.type === 'checkbox') field.checked = !!v;
+    else if (field.type === 'date') {
+      field.value = toDateInputValue(v);
+      field.dataset.raw = field.value ? '' : String(v);
+    } else field.value = v;
+  }
+  syncTiles();
+  updatePercentOff();
+  updateHero();
+  form.elements.color?.focus();
 }
 
 // Opens the add/edit form pre-filled with an existing yoyo's data. `fromDetail`
@@ -4531,7 +4569,7 @@ function demoGuard() {
 function renderDemoBanner(loggedIn) {
   document.body.classList.toggle('demo-mode', demoModeState);
   const tip = demoModeState ? 'Editing is disabled in this demo' : '';
-  ['#addBtn', '#saveBtn', '#saveAddAnotherBtn', '#deleteBtn', '#detailEdit', '#detailDelete', '#selectBtn']
+  ['#addBtn', '#saveBtn', '#saveAddAnotherBtn', '#deleteBtn', '#detailEdit', '#detailColorway', '#detailDelete', '#selectBtn']
     .forEach((sel) => { const el = $(sel); if (el) el.title = tip; });
 
   let bar = document.getElementById('demoBanner');
