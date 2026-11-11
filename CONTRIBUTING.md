@@ -17,7 +17,7 @@ No build step — the front end is plain HTML/CSS/JS in `public/`.
 - `db.js` — SQLite (Node's built-in `node:sqlite`) wrapper + schema bootstrap
 - `carriers.js` — UPS / USPS / FedEx tracking lookups
 - `dates.js` — calendar-day normalization (see "Dates" below)
-- `unzip.js` — streaming zip reader used by Restore
+- `unzip.js` — streaming zip reader used by Restore and the 360° spin `.zip` upload
 - `schema.sql` — database schema
 - `public/` — the front end (`index.html`, `app.js`, `styles.css`)
 

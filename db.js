@@ -176,6 +176,17 @@ backfillPhotoUuids(db);
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_uuid ON photos(uuid)');
 
+// Media types beyond stills: a looped video, or a 360 spin stored as one row
+// per frame. Existing rows are plain photos, which is exactly what the DEFAULT
+// backfills them to, so this migration needs no data pass.
+if (!photoCols.includes('kind')) {
+  db.exec("ALTER TABLE photos ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'");
+}
+if (!photoCols.includes('group_uuid')) {
+  db.exec('ALTER TABLE photos ADD COLUMN group_uuid TEXT');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_photos_group ON photos(group_uuid)');
+
 // Assign a UUID to every photo that lacks one. Exported so the restore endpoint
 // can re-run it after importing rows from a pre-sync backup.
 export function backfillPhotoUuids(database) {

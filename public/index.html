@@ -388,6 +388,18 @@
             <span class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
             <span class="dz-text">Click to add photos<br><small>or drag &amp; drop them here</small></span>
           </label>
+          <div class="media-adds">
+            <label class="media-add">
+              <input type="file" id="spinInput" accept="image/*,.zip,application/zip" multiple hidden />
+              <span class="ma-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="9" ry="4.2"/><path d="M6.6 14.6A9 9 0 0 0 12 16.5a9 9 0 0 0 5.4-1.9"/><path d="m9.4 4.7 2.6-1.7 2.6 1.7"/></svg></span>
+              <span class="ma-text">Add 360° spin<br><small>frame sequence, or a .zip of it</small></span>
+            </label>
+            <label class="media-add">
+              <input type="file" id="videoInput" accept="video/mp4,video/webm" hidden />
+              <span class="ma-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="13" height="13" rx="2.5"/><path d="m16 12 5-3v9l-5-3z"/></svg></span>
+              <span class="ma-text">Add video<br><small>looping .mp4 or .webm</small></span>
+            </label>
+          </div>
         </section>
 
         <section class="form-section">
@@ -578,7 +590,7 @@
 
   <!-- Lightbox -->
   <div id="lightbox" class="lightbox hidden" data-close>
-    <img id="lightboxImg" alt="" />
+    <div id="lightboxBody" class="lightbox-body"></div>
   </div>
 
   <!-- Toast notifications -->

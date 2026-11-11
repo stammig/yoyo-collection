@@ -81,16 +81,25 @@ CREATE TABLE IF NOT EXISTS field_defs (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One row per media FILE, not per gallery item: a 360 spin is N rows (one per
+-- frame) sharing a group_uuid, which the API collapses back into a single
+-- gallery entry. Keeping it one-row-per-file means backup/restore and the sync
+-- manifest -- both of which move individual files -- need no special cases.
 CREATE TABLE IF NOT EXISTS photos (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   yoyo_id     INTEGER NOT NULL,
   uuid        TEXT,                        -- stable cross-device id for sync (unique index created in db.js)
   filename    TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'photo', -- photo | video | spin
+  group_uuid  TEXT,                        -- spin only: frames of one sequence share this
   sort_order  INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (yoyo_id) REFERENCES yoyos(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_photos_yoyo ON photos(yoyo_id);
+-- The index on group_uuid lives in db.js, not here: this file runs before the
+-- ALTER TABLE migrations, so on an existing database the column doesn't exist
+-- yet and indexing it here would fail the boot.
 
 -- External video embeds (YouTube / Instagram) attached to a yoyo: reviews,
 -- trick videos, unboxings. These are references rather than product imagery, so
