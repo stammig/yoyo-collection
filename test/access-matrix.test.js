@@ -27,8 +27,7 @@ async function login(s) {
 const MODES = [
   { name: 'fully open (no password, not read-only)', env: {}, anon: { backup: true, export: true, import: true, restore: true } },
   { name: 'password set', env: { ADMIN_PASSWORD: PW }, anon: { backup: false, export: false, import: false, restore: false } },
-  { name: 'READ_ONLY with no password (public showcase)', env: { READ_ONLY: '1' }, anon: { backup: false, export: false, import: false, restore: false },
-    todo: { backup: 'Phase 1 · 1A.1 — /api/backup.zip checks LOGIN_ENABLED, not isOwner (server.js:1676)' } },
+  { name: 'READ_ONLY with no password (public showcase)', env: { READ_ONLY: '1' }, anon: { backup: false, export: false, import: false, restore: false } },
   { name: 'READ_ONLY with a password', env: { READ_ONLY: '1', ADMIN_PASSWORD: PW }, anon: { backup: false, export: false, import: false, restore: false } },
 ];
 
@@ -96,9 +95,7 @@ describe('cross-site requests carrying the owner cookie (CSRF)', () => {
     const res = await s.api('/api/import', { ...csvForm(CSV), headers: { Cookie: owner.cookie, 'Sec-Fetch-Site': 'same-origin' } });
     assert.ok(allowed(res.status), `got HTTP ${res.status}`);
   });
-  test('a cross-site form post with the cookie is refused',
-    { todo: 'Phase 1 · 1A.2 — no Origin / Sec-Fetch-Site check in the write gate (server.js:~289)' },
-    async () => {
+  test('a cross-site form post with the cookie is refused', async () => {
       const res = await s.api('/api/import', {
         ...csvForm(CSV),
         headers: { Cookie: owner.cookie, Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' },

@@ -4611,6 +4611,8 @@ async function loadConfig() {
   // there would be no way back.
   const ro = $('#readOnlyAdmin');
   if (ro) ro.classList.toggle('hidden', !isOwnerState);
+  const sess = $('#sessionsAdmin');
+  if (sess) sess.classList.toggle('hidden', !c.loggedIn);
   const roBox = $('#readOnlyToggle');
   if (roBox) roBox.checked = readOnlyState;
   updateToolbar();
@@ -4655,6 +4657,21 @@ $('#loginForm').addEventListener('submit', async (e) => {
     $('#loginError').textContent = err.message || 'Incorrect password.';
     $('#loginError').classList.remove('hidden');
   }
+});
+
+$('#logoutAllBtn')?.addEventListener('click', async () => {
+  if (!confirm('Sign out every browser and app? They will all need the password again.')) return;
+  const status = $('#logoutAllStatus');
+  try {
+    await api('/api/logout-all', { method: 'POST' });
+  } catch (err) {
+    if (status) status.textContent = err.message || 'Could not sign out everywhere.';
+    return;
+  }
+  try { localStorage.removeItem('yoyoToken'); } catch { /* ignore */ }
+  closeModal(); closeDetail();
+  await loadConfig();
+  await loadAll();
 });
 
 $('#logoutBtn').addEventListener('click', async () => {

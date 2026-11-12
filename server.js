@@ -89,6 +89,17 @@ const app = express();
 // X-Forwarded-For entry; we read it directly so we don't have to trust-proxy
 // globally.
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 0;
+// X-Forwarded-For is written by whoever sends the request, so it only names the
+// real client when a proxy you run sets it. Set TRUST_PROXY=1 behind one
+// (Passenger, nginx, Caddy, Cloudflare); otherwise the socket address is used.
+const TRUST_PROXY = ['1', 'true', 'yes'].includes(String(process.env.TRUST_PROXY || '').toLowerCase());
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const fwd = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
 if (RATE_LIMIT_MAX > 0) {
   const hits = new Map(); // ip -> { count, resetAt }
@@ -105,8 +116,7 @@ if (RATE_LIMIT_MAX > 0) {
     // "is this one already there?" (a 700-photo publish otherwise trips the limit
     // and the real uploads that follow fail with 429).
     if ((req.method === 'GET' || req.method === 'HEAD') && req.path.startsWith('/uploads/')) return next();
-    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-      || req.socket.remoteAddress || 'unknown';
+    const ip = clientIp(req);
     const now = Date.now();
     let b = hits.get(ip);
     if (!b || b.resetAt <= now) { b = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS }; hits.set(ip, b); }
@@ -155,21 +165,33 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 // Signed, stateless session token: base64url(JSON payload) + "." + HMAC signature.
 // No server-side session store needed — validity is just "signature checks out
 // and exp hasn't passed".
+// Every token carries the session epoch it was issued under. "Sign out
+// everywhere" bumps the epoch, so every earlier token stops working at once
+// (the web, the Apple apps and Android all sign in again). Changing
+// ADMIN_PASSWORD already does the same, because the signing key derives from it.
+function sessionEpoch() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'session_epoch'").get();
+  return row ? Number(row.value) || 0 : 0;
+}
 function makeToken() {
-  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE * 1000 })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE * 1000, ep: sessionEpoch() })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 // Verifies a token from makeToken(): signature must match (constant-time
 // compare, to avoid a timing side-channel) and it must not be expired.
+// Anything malformed is simply "not logged in" — never an exception, which
+// would turn one bad cookie into a 400 on every request.
 function validToken(token) {
-  if (!token || !token.includes('.')) return false;
-  const [payload, sig] = token.split('.');
-  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
-  if (sig.length !== expected.length) return false;
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
-  try { return JSON.parse(Buffer.from(payload, 'base64url').toString()).exp > Date.now(); }
-  catch { return false; }
+  try {
+    if (typeof token !== 'string' || !token.includes('.')) return false;
+    const [payload, sig] = token.split('.');
+    const expected = Buffer.from(crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url'));
+    const given = Buffer.from(sig || '');
+    if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return false;
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return claims.exp > Date.now() && (claims.ep || 0) === sessionEpoch();
+  } catch { return false; }
 }
 // Minimal cookie parser — avoids pulling in a whole cookie-parsing dependency
 // for the one cookie this app sets.
@@ -177,7 +199,9 @@ function parseCookies(req) {
   const out = {};
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i <= 0) continue;
+    const raw = part.slice(i + 1).trim();
+    try { out[part.slice(0, i).trim()] = decodeURIComponent(raw); } catch { out[part.slice(0, i).trim()] = raw; }
   }
   return out;
 }
@@ -240,40 +264,100 @@ function allowedDespiteReadOnly(req) {
   // POST so the method-based write gate catches it. Arrivals is owner-only, so
   // the only read-only requester who needs it is the owner.
   if (req.path === '/api/track') return isOwner(req);
+  // Signing out everywhere is a security action, not an edit.
+  if (req.path === '/api/logout-all') return isLoggedIn(req);
   return isPublish(req) && isLoggedIn(req);
 }
 
+function isCrossSite(req) {
+  const site = req.headers['sec-fetch-site'];
+  if (site === 'cross-site' || site === 'same-site') return true;
+  const origin = req.headers.origin;
+  if (!origin || origin === 'null') return origin === 'null';
+  let host;
+  try { host = new URL(origin).host; } catch { return true; }
+  if (host === req.headers.host) return false;
+  // Behind a proxy that rewrites Host, it reports the original in X-Forwarded-Host.
+  const fwdHost = TRUST_PROXY && String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  return !(fwdHost && host === fwdHost);
+}
+
 // ---- Login / logout (registered BEFORE the write gate so they aren't blocked) ----
+// Wrong-password limiter, on by default. Only failures count, so signing in
+// correctly (the web, or an app's "Publish to website" / connection check)
+// never uses up the allowance. Per client IP, plus a site-wide ceiling so a
+// spread-out guesser is slowed down too.
+const LOGIN_FAIL_MAX = Number(process.env.LOGIN_FAIL_MAX) || 10;
+const LOGIN_FAIL_GLOBAL_MAX = Number(process.env.LOGIN_FAIL_GLOBAL_MAX) || 100;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60_000;
+const loginFails = new Map(); // key -> { count, resetAt }
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, b] of loginFails) if (b.resetAt <= now) loginFails.delete(k);
+}, LOGIN_FAIL_WINDOW_MS).unref();
+function failBucket(key) {
+  const now = Date.now();
+  let b = loginFails.get(key);
+  if (!b || b.resetAt <= now) { b = { count: 0, resetAt: now + LOGIN_FAIL_WINDOW_MS }; loginFails.set(key, b); }
+  return b;
+}
+function passwordMatches(given) {
+  // Hash both sides to a fixed length so the comparison is constant-time
+  // whatever the input length.
+  const a = crypto.createHash('sha256').update(String(given)).digest();
+  const b = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+// No embedding (decided for 1.2.1), so the cookie is always SameSite=Lax: a
+// browser never sends it on another site's form post or fetch.
+function sessionCookieAttrs(req, maxAge) {
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const attrs = ['Path=/', 'HttpOnly', `Max-Age=${maxAge}`, 'SameSite=Lax'];
+  if (secure) attrs.push('Secure');
+  return attrs;
+}
+
 app.post('/api/login', (req, res) => {
   if (!LOGIN_ENABLED) return res.status(400).json({ error: 'Login is not enabled on this server.' });
-  if ((req.body?.password || '') !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Incorrect password.' });
-  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  const attrs = ['Path=/', 'HttpOnly', `Max-Age=${SESSION_MAX_AGE}`];
-  // SameSite=None;Secure lets login work inside an HTTPS iframe; Lax for local http.
-  attrs.push(secure ? 'SameSite=None' : 'SameSite=Lax');
-  if (secure) attrs.push('Secure');
+  const ipBucket = failBucket('ip:' + clientIp(req));
+  const allBucket = failBucket('all');
+  if (ipBucket.count >= LOGIN_FAIL_MAX || allBucket.count >= LOGIN_FAIL_GLOBAL_MAX) {
+    const until = Math.max(ipBucket.count >= LOGIN_FAIL_MAX ? ipBucket.resetAt : 0, allBucket.count >= LOGIN_FAIL_GLOBAL_MAX ? allBucket.resetAt : 0);
+    res.setHeader('Retry-After', Math.ceil((until - Date.now()) / 1000));
+    return res.status(429).json({ error: 'Too many wrong passwords. Try again in a few minutes.' });
+  }
+  if (!passwordMatches(req.body?.password || '')) {
+    ipBucket.count++; allBucket.count++;
+    return res.status(401).json({ error: 'Incorrect password.' });
+  }
+  const attrs = sessionCookieAttrs(req, SESSION_MAX_AGE);
   const token = makeToken();
   res.setHeader('Set-Cookie', `yoyo_session=${token}; ${attrs.join('; ')}`);
   res.json({ ok: true, token });
 });
 app.post('/api/logout', (req, res) => {
-  // Must mirror the login cookie's attributes (incl. SameSite=None; Secure on
-  // HTTPS) or the browser won't clear it inside a cross-site iframe.
-  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  const attrs = ['yoyo_session=', 'Path=/', 'HttpOnly', 'Max-Age=0'];
-  attrs.push(secure ? 'SameSite=None' : 'SameSite=Lax');
-  if (secure) attrs.push('Secure');
-  res.setHeader('Set-Cookie', attrs.join('; '));
+  // Mirrors the login cookie's attributes so the browser clears the same cookie.
+  res.setHeader('Set-Cookie', ['yoyo_session=', ...sessionCookieAttrs(req, 0)].join('; '));
   res.json({ ok: true });
 });
 
 app.use((req, res, next) => {
-  // Allow (only) your site to embed this app in an <iframe>.
-  if (FRAME_ANCESTORS) {
-    res.setHeader('Content-Security-Policy', `frame-ancestors ${FRAME_ANCESTORS}`);
-  }
+  // Safe defaults on every response. Framing is same-origin only unless
+  // FRAME_ANCESTORS names who may embed the app.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', `frame-ancestors ${FRAME_ANCESTORS || "'self'"}`);
+  if (!FRAME_ANCESTORS) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
 
   const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+
+  // Cross-site request forgery: a write that comes from another site's page is
+  // refused unless it carries a bearer token. Browsers always label such a
+  // request (Sec-Fetch-Site, and Origin on a POST); the native apps and other
+  // API clients send a bearer token and no Origin, so they are unaffected.
+  if (isWrite && !bearerToken(req) && isCrossSite(req)) {
+    return res.status(403).json({ error: 'That request came from another website, so it was refused.' });
+  }
 
   // Public demo: keep it out of search, and refuse every write even from a
   // logged-in visitor (login/logout are registered before this gate, so they
@@ -367,7 +451,17 @@ const uploadZip = multer({
 
 // ---- Static files ----
 // Uploads use unique filenames, so cache hard (cuts repeat egress dramatically).
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '365d', immutable: true }));
+// Only image files are served from here, with a policy that lets nothing in
+// them run — so even a file that got into the folder some other way can never
+// act as a page on this site. HEAD /uploads/<name> answering 200/404 is part of
+// the Apple apps' publish (it asks "is this photo already there?"), so this
+// stays public and keeps that behaviour.
+const SERVABLE_UPLOAD = /\.(?:jpe?g|png|webp|gif)$/i;
+app.use('/uploads', (req, res, next) => {
+  if (!SERVABLE_UPLOAD.test(req.path)) return res.status(404).end();
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+  next();
+}, express.static(UPLOAD_DIR, { maxAge: '365d', immutable: true, dotfiles: 'ignore' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- Shareable per-yoyo page (/y/:id) ----
@@ -383,9 +477,11 @@ app.get('/y/:id', (req, res) => {
   const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   res.type('html');
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
-  if (!row) return res.send(indexHtml); // unknown/deleted id — just load the app
+  // Unknown, deleted or Sold — just load the app. A link preview is fetched by
+  // a chat app's bot, never the owner, so it only ever shows the public view.
+  if (!row || isSoldRow(row)) return res.send(indexHtml);
 
-  const y = decorate(row);
+  const y = publicSafe(decorate(row), false);
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
   const base = `${proto}://${req.get('host')}`;
   const name = `${y.brand || ''} ${y.model || ''}`.trim() || 'Yoyo';
@@ -413,7 +509,9 @@ app.get('/y/:id', (req, res) => {
     image ? `<meta name="twitter:image" content="${escHtml(image)}" />` : '',
   ].filter(Boolean).join('\n  ');
 
-  res.send(indexHtml.replace('</head>', `  ${tags}\n</head>`));
+  // A function, not a string: in a replacement string `$&`, `$'` and `$``
+  // are patterns, so a model name containing them would mangle the page.
+  res.send(indexHtml.replace('</head>', () => `  ${tags}\n</head>`));
 });
 
 // ---- Helpers ----
@@ -469,12 +567,24 @@ function percentOff(y) {
 // ---- Thumbnails (cut bandwidth: grid/list show small thumbs, full image only on zoom) ----
 const THUMB_MAX = 480;
 function thumbName(filename) {
-  return 'thumb-' + filename.replace(/\.[^.]+$/, '') + '.jpg';
+  return 'thumb-' + path.basename(String(filename)).replace(/\.[^.]+$/, '') + '.jpg';
 }
+// Every file the app reads, writes or deletes under uploads/ goes through
+// here. basename() means a stored filename can never point outside the folder,
+// whatever a backup or a client put in the database (e.g. "../yoyos.db").
+function uploadPath(name) {
+  return path.join(UPLOAD_DIR, path.basename(String(name)));
+}
+// What a photo file may be called: letters, digits, dot, dash, underscore,
+// starting with a letter or digit, and an image extension. Covers every name
+// the app has ever written — "<timestamp>-<hex>.jpg" from the web, and
+// "<UUID>.jpg" (upper- or lower-case) from the Apple and Android apps.
+const SAFE_PHOTO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.(?:jpe?g|png|webp|gif)$/i;
+const isSafePhotoName = (name) => typeof name === 'string' && SAFE_PHOTO_NAME.test(name) && !name.includes('..');
 async function makeThumb(filename) {
   if (!sharp) return; // image processing unavailable — frontend falls back to full image
-  const src = path.join(UPLOAD_DIR, filename);
-  const out = path.join(UPLOAD_DIR, thumbName(filename));
+  const src = uploadPath(filename);
+  const out = uploadPath(thumbName(filename));
   await sharp(src)
     .rotate() // respect EXIF orientation from phone cameras
     .resize(THUMB_MAX, THUMB_MAX, { fit: 'inside', withoutEnlargement: true })
@@ -605,7 +715,7 @@ async function fetchVidThumb(provider, embedRef) {
   const src = vidThumbSource(provider, embedRef);
   if (!src) return false;
   const name = vidThumbName(provider, embedRef);
-  const dest = path.join(UPLOAD_DIR, name);
+  const dest = uploadPath(name);
   if (fs.existsSync(dest)) return true;
   if (vidThumbFailed.has(name)) return false;
   try {
@@ -674,7 +784,7 @@ function cleanupVidThumbs(rows) {
   for (const v of rows) {
     const left = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE provider = ? AND embed_ref = ?')
       .get(v.provider, v.embed_ref).c;
-    if (left === 0) fs.rm(path.join(UPLOAD_DIR, vidThumbName(v.provider, v.embed_ref)), { force: true }, () => {});
+    if (left === 0) fs.rm(uploadPath(vidThumbName(v.provider, v.embed_ref)), { force: true }, () => {});
   }
 }
 
@@ -692,14 +802,15 @@ function videosFor(yoyoId) {
       embedUrl: buildEmbedUrl(v),
       posterUrl: (() => {
         const name = vidThumbName(v.provider, v.embed_ref);
-        if (fs.existsSync(path.join(UPLOAD_DIR, name))) return `/uploads/${name}`;
+        if (fs.existsSync(uploadPath(name))) return `/uploads/${name}`;
         queueVidThumb(v.provider, v.embed_ref);
         return null;
       })(),
       vertical: !!v.vertical,
       start_s: v.start_s,
     }))
-    .filter((v) => v.embedUrl); // a row whose provider we no longer build for
+    .filter((v) => v.embedUrl) // a row whose provider we no longer build for
+    .filter((v) => /^https?:\/\//i.test(v.url || ''));
 }
 
 // Expands a raw `yoyos` row into the shape the API/client expects: attaches
@@ -709,6 +820,7 @@ function decorate(yoyo) {
   const photos = db
     .prepare('SELECT id, uuid, filename FROM photos WHERE yoyo_id = ? ORDER BY sort_order, id')
     .all(yoyo.id)
+    .filter((p) => isSafePhotoName(p.filename))
     .map((p) => ({ id: p.id, uuid: p.uuid, url: `/uploads/${p.filename}`, thumbUrl: `/uploads/${thumbName(p.filename)}` }));
   let custom = {};
   try { custom = JSON.parse(yoyo.custom || '{}'); } catch { /* ignore bad JSON */ }
@@ -776,12 +888,26 @@ function growSelectOptions(customObj) {
   }
 }
 
-// Fields hidden from anyone who can't edit (public/read-only view).
-const SENSITIVE_KEYS = ['retail', 'paid', 'percent_off', 'tracking', 'eta', 'in_hand', 'purchase_date', 'sold_date', 'seller', 'buyer', 'market_value', 'trade_value', 'sale_listed_at'];
+// What a visitor (anyone who isn't the owner) may see. This is a list of what
+// IS public, not of what isn't, so a column added later stays private until
+// it's deliberately added here. Decided for 1.2.1: Sold items and custom fields
+// are never public.
+const PUBLIC_KEYS = [
+  'id', 'brand', 'model', 'color', 'body_material', 'composition', 'condition',
+  'weight_g', 'diameter_mm', 'width_mm', 'gap_mm', 'bearing_size', 'response_type',
+  'finish', 'shape', 'edition', 'serial_number', 'signature', 'description', 'release_date',
+  'favorite', 'retired', 'photos', 'videos',
+];
+const LISTED_STATUSES = new Set(['For Sale', 'For Trade', 'For Sale or Trade']);
+const isSoldRow = (y) => String(y.sale_status || '').trim().toLowerCase() === 'sold';
 function publicSafe(y, editable) {
   if (editable) return y;
-  const out = { ...y };
-  for (const k of SENSITIVE_KEYS) delete out[k];
+  const out = {};
+  for (const k of PUBLIC_KEYS) if (k in y) out[k] = y[k];
+  out.custom = {};
+  // The asking price is public only while the yoyo is actually listed.
+  if (LISTED_STATUSES.has(y.sale_status)) { out.sale_status = y.sale_status; out.sale_price = y.sale_price; }
+  else out.sale_status = '';
   return out;
 }
 
@@ -789,13 +915,14 @@ function publicSafe(y, editable) {
 
 app.get('/api/yoyos', (req, res) => {
   const editable = isOwner(req);
-  const rows = db.prepare('SELECT * FROM yoyos WHERE deleted_at IS NULL ORDER BY brand, model, color').all();
+  const rows = db.prepare('SELECT * FROM yoyos WHERE deleted_at IS NULL ORDER BY brand, model, color').all()
+    .filter((r) => editable || !isSoldRow(r));
   res.json(rows.map((r) => publicSafe(decorate(r), editable)));
 });
 
 app.get('/api/yoyos/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (!row || (!isOwner(req) && isSoldRow(row))) return res.status(404).json({ error: 'Not found' });
   res.json(publicSafe(decorate(row), isOwner(req)));
 });
 
@@ -858,8 +985,8 @@ app.delete('/api/yoyos/:id', (req, res) => {
   // full images and their thumbnails, then drop the photo rows.
   const photos = db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(req.params.id);
   for (const p of photos) {
-    fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+    fs.rm(uploadPath(p.filename), { force: true }, () => {});
+    fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
   }
   // Keep the yoyo row as a tombstone (deleted_at set) so the deletion propagates
   // to other devices on sync, rather than re-appearing from a device that still has it.
@@ -913,8 +1040,8 @@ app.delete('/api/photos/:photoId', (req, res) => {
     db.prepare('DELETE FROM photos WHERE id = ?').run(req.params.photoId);
     touchYoyo(photo.yoyo_id);
   })();
-  fs.rm(path.join(UPLOAD_DIR, photo.filename), { force: true }, () => {});
-  fs.rm(path.join(UPLOAD_DIR, thumbName(photo.filename)), { force: true }, () => {});
+  fs.rm(uploadPath(photo.filename), { force: true }, () => {});
+  fs.rm(uploadPath(thumbName(photo.filename)), { force: true }, () => {});
   res.json({ ok: true });
 });
 
@@ -924,7 +1051,7 @@ app.post('/api/photos/optimize', async (req, res) => {
   const rows = db.prepare('SELECT filename FROM photos').all();
   let processed = 0, skipped = 0, failed = 0;
   for (const r of rows) {
-    if (fs.existsSync(path.join(UPLOAD_DIR, thumbName(r.filename)))) { skipped++; continue; }
+    if (fs.existsSync(uploadPath(thumbName(r.filename)))) { skipped++; continue; }
     try { await makeThumb(r.filename); processed++; } catch (e) { console.error('optimize:', e.message); failed++; }
   }
   res.json({ total: rows.length, processed, skipped, failed });
@@ -1077,15 +1204,15 @@ function applyPhotoManifest(yoyoId, manifest) {
   for (const p of db.prepare('SELECT * FROM photos WHERE yoyo_id = ?').all(yoyoId)) {
     if (keep.has(p.uuid)) continue;
     db.prepare('DELETE FROM photos WHERE id = ?').run(p.id);
-    fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-    fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+    fs.rm(uploadPath(p.filename), { force: true }, () => {});
+    fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
   }
   for (const e of entries) {
     const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(e.uuid);
     if (row) {
       if (row.yoyo_id !== yoyoId) continue; // uuid belongs to another yoyo — ignore
       db.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').run(e.sort_order, row.id);
-      if (!fs.existsSync(path.join(UPLOAD_DIR, row.filename))) missing.push(e.uuid);
+      if (!fs.existsSync(uploadPath(row.filename))) missing.push(e.uuid);
     } else {
       db.prepare('INSERT INTO photos (yoyo_id, uuid, filename, sort_order) VALUES (?, ?, ?, ?)')
         .run(yoyoId, e.uuid, `${e.uuid}.${e.ext}`, e.sort_order);
@@ -1172,8 +1299,8 @@ app.post('/api/sync/push', (req, res) => {
         // A pushed delete mirrors DELETE /api/yoyos/:id — photo files go now.
         if (deletedAt && !existing.deleted_at) {
           for (const p of db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id)) {
-            fs.rm(path.join(UPLOAD_DIR, p.filename), { force: true }, () => {});
-            fs.rm(path.join(UPLOAD_DIR, thumbName(p.filename)), { force: true }, () => {});
+            fs.rm(uploadPath(p.filename), { force: true }, () => {});
+            fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
           }
           db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(existing.id);
           db.prepare('DELETE FROM videos WHERE yoyo_id = ?').run(existing.id);
@@ -1231,7 +1358,7 @@ app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
   if (!yoyo) {
     // basename() keeps this strictly inside UPLOAD_DIR even though the filename
     // is already a validated uuid (see the UUID_RE guard above).
-    fs.rmSync(path.join(UPLOAD_DIR, path.basename(req.file.filename)), { force: true });
+    fs.rmSync(uploadPath(path.basename(req.file.filename)), { force: true });
     return res.status(404).json({ error: 'Yoyo not found.' });
   }
 
@@ -1323,6 +1450,16 @@ app.get('/api/settings', (_req, res) => {
   res.json(out);
 });
 // Owner-only (the write gate above blocks this unless logged in, and in demo mode).
+// Sign out everywhere: every token issued so far stops working — browsers,
+// the Apple apps and Android all have to sign in again. Owner only (write gate).
+app.post('/api/logout-all', (req, res) => {
+  if (!isLoggedIn(req)) return res.status(401).json({ error: 'Log in first.' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('session_epoch', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run(String(sessionEpoch() + 1));
+  res.setHeader('Set-Cookie', ['yoyo_session=', ...sessionCookieAttrs(req, 0)].join('; '));
+  res.json({ ok: true });
+});
+
 app.put('/api/settings/:key', (req, res) => {
   if (!PUBLIC_SETTINGS.includes(req.params.key)) return res.status(400).json({ error: 'Unknown setting.' });
   const value = String(req.body?.value ?? '').slice(0, 5000);
@@ -1673,11 +1810,22 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
 // ---- API: full backup / restore (database + photos as one .zip) ----
 
 app.get('/api/backup.zip', (req, res) => {
-  if (LOGIN_ENABLED && !isLoggedIn(req)) {
-    return res.status(401).json({ error: 'Log in to download a backup.' });
+  // Same rule as CSV export: a public read-only showcase (READ_ONLY with no
+  // password) has no owner, so nobody may download the database from it.
+  if (!isOwner(req)) {
+    return res.status(LOGIN_ENABLED ? 401 : 403).json({ error: 'Log in to download a backup.' });
   }
-  // Flush the write-ahead log so the copied DB file is complete and current.
-  db.pragma('wal_checkpoint(TRUNCATE)');
+  // VACUUM INTO writes a consistent snapshot to a new file, however busy the
+  // live (WAL-mode) database is; copying the live file could catch it mid-write.
+  const snapshot = path.join(SCRATCH_DIR, `backup-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.db`);
+  try {
+    db.prepare('VACUUM INTO ?').run(snapshot);
+  } catch (err) {
+    fs.rmSync(snapshot, { force: true });
+    console.error('backup snapshot failed:', err);
+    return res.status(500).json({ error: 'Backup failed.' });
+  }
+  res.on('close', () => fs.rmSync(snapshot, { force: true }));
 
   const date = localDayStamp();
   res.setHeader('Content-Type', 'application/zip');
@@ -1697,9 +1845,15 @@ app.get('/api/backup.zip', (req, res) => {
     res.destroy(err);
   });
   archive.pipe(res);
-  archive.file(DB_PATH, { name: 'yoyos.db' });
-  if (fs.existsSync(UPLOAD_DIR) && fs.readdirSync(UPLOAD_DIR).length) {
-    archive.directory(UPLOAD_DIR, 'uploads');
+  archive.file(snapshot, { name: 'yoyos.db' });
+  // Image files only, one level deep, so a restore staging folder or anything
+  // else that ended up in uploads/ is never put in a backup.
+  if (fs.existsSync(UPLOAD_DIR)) {
+    for (const f of fs.readdirSync(UPLOAD_DIR, { withFileTypes: true })) {
+      if (f.isFile() && SERVABLE_UPLOAD.test(f.name) && !f.name.startsWith('.')) {
+        archive.file(path.join(UPLOAD_DIR, f.name), { name: `uploads/${f.name}` });
+      }
+    }
   }
   archive.finalize();
 });
@@ -1798,60 +1952,109 @@ app.delete('/api/restore/uploads/:id', (req, res) => {
   res.status(204).end();
 });
 
+// Restore treats the zip as untrusted: it may have been made by someone else.
+//
+// Two kinds of backup arrive here, and both must keep working:
+//   · a web backup (/api/backup.zip): yoyos.db with every table, plus uploads/
+//   · an Apple app "Publish to website" (WebPublisher.swift): yoyos.db with
+//     only yoyos and photos tables, no uploads/ at all, UPPERCASE uuids and
+//     "<UUID>.jpg" photo names. The photo bytes follow one by one through
+//     /api/sync/photos, so restore must leave existing photo files alone and
+//     keep photo rows whose file hasn't arrived yet.
+// Tables a backup doesn't have (videos, field_defs, settings) are kept as they
+// are on the site rather than wiped.
+const RESTORE_MAX_ENTRIES = 200_000;
+const RESTORE_EXTRACT_MAX = Number(process.env.RESTORE_EXTRACT_MAX_MB || 16384) * 1024 * 1024;
+// Settings a backup may bring with it. Everything else (read_only, the sync
+// counter, the session epoch) belongs to this server, not to the backup.
+const RESTORABLE_SETTINGS = ['sale_notes'];
+
 async function restoreFromZip(zipPath, res) {
   let entries;
   try { entries = listEntries(zipPath); }
   catch { return res.status(400).json({ error: 'That file is not a valid .zip backup.' }); }
+  if (entries.length > RESTORE_MAX_ENTRIES) {
+    return res.status(400).json({ error: 'That backup has too many files in it.' });
+  }
+  const declared = entries.reduce((n, e) => n + (e.size || 0), 0);
+  if (declared > RESTORE_EXTRACT_MAX) {
+    return res.status(400).json({ error: `That backup unpacks to more than this server allows (${Math.round(RESTORE_EXTRACT_MAX / 1048576)}MB; see RESTORE_EXTRACT_MAX_MB).` });
+  }
 
-  const dbEntry = entries.find((e) => !e.isDirectory && path.basename(e.name) === 'yoyos.db');
+  const dbEntry = entries.find((e) => !e.isDirectory && e.name === 'yoyos.db')
+    || entries.find((e) => !e.isDirectory && path.basename(e.name) === 'yoyos.db');
   if (!dbEntry) return res.status(400).json({ error: 'Backup is missing yoyos.db — is this a yoyo backup?' });
 
   // Open the backup DB from a temp file (read-only) and copy its rows in.
-  const tmp = path.join(SCRATCH_DIR, `yoyo-restore-${Date.now()}.db`);
-  let yoyoRows, photoRows, videoRows, backupHasVideos = true;
+  const tmp = path.join(SCRATCH_DIR, `yoyo-restore-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.db`);
+  let yoyoRows, photoRows, videoRows = [], fieldRows = null, settingRows = null, backupHasVideos = false;
   try {
     await extractEntry(zipPath, dbEntry, tmp);
     const src = openDatabase(tmp, { readOnly: true });
+    const tables = new Set(src.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name));
     yoyoRows = src.prepare('SELECT * FROM yoyos').all();
-    photoRows = src.prepare('SELECT * FROM photos').all();
-    // A backup taken before video embeds existed has no such table; that's an
-    // empty list, not a broken backup.
-    try { videoRows = src.prepare('SELECT * FROM videos').all(); }
-    catch { videoRows = []; backupHasVideos = false; }
+    photoRows = tables.has('photos') ? src.prepare('SELECT * FROM photos').all() : [];
+    if (tables.has('videos')) videoRows = src.prepare('SELECT * FROM videos').all();
+    if (tables.has('field_defs')) fieldRows = src.prepare('SELECT * FROM field_defs').all();
+    if (tables.has('settings')) {
+      settingRows = src.prepare(`SELECT key, value FROM settings WHERE key IN (${RESTORABLE_SETTINGS.map(() => '?').join(',')})`).all(...RESTORABLE_SETTINGS);
+    }
+    backupHasVideos = tables.has('videos');
     src.close();
   } catch (err) {
     return res.status(400).json({ error: `Could not read backup database: ${err.message}` });
   } finally {
     // Backups are taken from a WAL database, so the copy carries WAL mode in its
-    // header and even a read-only open spawns -wal/-shm alongside it. Removing
-    // just the .db left those two behind on every restore.
+    // header and even a read-only open spawns -wal/-shm alongside it.
     for (const suffix of ['', '-wal', '-shm']) fs.rmSync(tmp + suffix, { force: true });
   }
 
-  // Photo files go first (basename only — never trust paths inside the zip):
-  // they're additive, so if extraction fails part-way (disk full, corrupt
-  // entry) the collection itself hasn't been touched yet.
+  // Photo rows: keep only safe filenames. Anything else ("../yoyos.db", quotes,
+  // markup) is dropped, so it can never reach a page or a file deletion.
+  const photoRowsIn = photoRows.length;
+  photoRows = photoRows.filter((p) => isSafePhotoName(p.filename));
+  // Video rows: re-derived from the link exactly as if it had been pasted, so a
+  // backup can't smuggle in a javascript: link or an arbitrary embed.
+  const videoRowsIn = videoRows.length;
+  videoRows = videoRows.flatMap((v) => {
+    const parsed = parseVideoUrl(v.url);
+    return parsed ? [{ ...v, provider: parsed.provider, embed_ref: parsed.embed_ref, url: parsed.url,
+      vertical: parsed.vertical ? 1 : 0, start_s: parsed.start_s }] : [];
+  });
+
+  // Photo files are unpacked into a hidden staging folder first (same disk as
+  // uploads/, so moving them is instant), and only moved in once the database
+  // has been replaced. A restore that fails part-way leaves every existing
+  // photo exactly as it was. Existing files are never deleted: a database-only
+  // publish from the Apple apps relies on that.
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-  let photoFiles = 0;
+  const staging = path.join(UPLOAD_DIR, `.restore-${crypto.randomBytes(6).toString('hex')}`);
+  fs.mkdirSync(staging);
+  const cleanStaging = () => fs.rmSync(staging, { recursive: true, force: true });
+  const staged = [];
+  let filesSkipped = 0;
   try {
     for (const e of entries) {
-      if (e.isDirectory || e.name.split('/')[0] !== 'uploads') continue;
-      const name = path.basename(e.name);
-      if (!name || name.startsWith('.')) continue;
-      await extractEntry(zipPath, e, path.join(UPLOAD_DIR, name));
-      photoFiles++;
+      if (e.isDirectory) continue;
+      const parts = e.name.split('/');
+      if (parts[0] !== 'uploads' || parts.length !== 2) continue;
+      const name = parts[1];
+      if (!isSafePhotoName(name)) { filesSkipped++; continue; }
+      await extractEntry(zipPath, e, path.join(staging, name));
+      staged.push(name);
     }
   } catch (err) {
-    return res.status(500).json({ error: `Could not restore photos (your collection was not changed): ${err.message}` });
+    cleanStaging();
+    return res.status(400).json({ error: `Could not restore photos (your collection was not changed): ${err.message}` });
   }
 
   const yoyoCols = new Set(db.prepare('PRAGMA table_info(yoyos)').all().map((c) => c.name));
   const photoCols = new Set(db.prepare('PRAGMA table_info(photos)').all().map((c) => c.name));
   const videoCols = new Set(db.prepare('PRAGMA table_info(videos)').all().map((c) => c.name));
+  const fieldCols = new Set(db.prepare('PRAGMA table_info(field_defs)').all().map((c) => c.name));
   // Only columns this schema has are inserted, and only those are passed as
-  // parameters: a backup from a newer build can carry extra columns, and on
-  // Node builds without setAllowUnknownNamedParameters an unmatched named
-  // parameter is an error that would refuse the whole restore.
+  // parameters: a backup from a newer build (or the Apple apps) can carry
+  // different columns, and an unmatched named parameter would refuse the restore.
   const insertFrom = (table, cols, row) => {
     const keys = Object.keys(row).filter((k) => cols.has(k));
     const params = Object.fromEntries(keys.map((k) => [k, row[k]]));
@@ -1859,42 +2062,75 @@ async function restoreFromZip(zipPath, res) {
       .run(params);
   };
 
-  // The native apps' "Publish to website" restores from a database that has no
-  // videos table at all — linked videos exist only on the web. Wiping them on
-  // every publish would make them impossible to keep, so when the backup has
-  // no videos table, the site's current videos are carried over to whichever
-  // yoyos (matched by uuid) the backup still contains. A backup that does have
-  // the table — any web backup — replaces videos exactly, as before.
+  // Linked videos exist only on the web, so a backup without a videos table
+  // (an Apple app publish) keeps the site's videos on whichever yoyos — matched
+  // by uuid, ignoring case — the backup still contains.
   const keptVideos = backupHasVideos ? [] : db.prepare(
     `SELECT v.*, y.uuid AS yoyo_uuid FROM videos v JOIN yoyos y ON y.id = v.yoyo_id WHERE y.deleted_at IS NULL`
   ).all();
   let videosKept = 0;
 
-  db.transaction(() => {
-    db.prepare('DELETE FROM yoyos').run(); // cascades to photos and videos
-    for (const r of yoyoRows) insertFrom('yoyos', yoyoCols, r);
-    for (const p of photoRows) insertFrom('photos', photoCols, p);
-    for (const v of videoRows) insertFrom('videos', videoCols, v);
-    const idByUuid = db.prepare('SELECT id FROM yoyos WHERE uuid = ? AND deleted_at IS NULL');
-    for (const { yoyo_uuid, id, ...v } of keptVideos) {
-      const target = yoyo_uuid && idByUuid.get(yoyo_uuid);
-      if (!target) continue;
-      insertFrom('videos', videoCols, { ...v, yoyo_id: target.id });
-      videosKept++;
-    }
-    // Restored rows carry stale or absent revs; re-stamp every row with a fresh
-    // change-feed position so sync clients re-pull the whole (replaced)
-    // collection. Photo files still match by uuid, so blobs aren't re-fetched.
-    for (const row of db.prepare('SELECT id FROM yoyos ORDER BY updated_at, id').all()) {
-      db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?').run(nextRev(), row.id);
-    }
-  })();
+  // Yoyos on the site that the backup doesn't mention are kept as tombstones
+  // (deleted_at set), so a phone or tablet that syncs with this site learns
+  // they're gone instead of pushing them back. Compared without case: the
+  // Apple apps write UPPERCASE uuids, the web and Android lower-case.
+  const backupUuids = new Set(yoyoRows.map((r) => String(r.uuid || '').toLowerCase()).filter(Boolean));
+  const vanished = db.prepare("SELECT uuid, deleted_at FROM yoyos WHERE uuid IS NOT NULL AND uuid != ''").all()
+    .filter((r) => !backupUuids.has(String(r.uuid).toLowerCase()));
+
+  try {
+    db.transaction(() => {
+      db.prepare('DELETE FROM yoyos').run(); // cascades to photos and videos
+      for (const r of yoyoRows) insertFrom('yoyos', yoyoCols, r);
+      for (const p of photoRows) insertFrom('photos', photoCols, p);
+      for (const v of videoRows) insertFrom('videos', videoCols, v);
+      const idByUuid = db.prepare('SELECT id FROM yoyos WHERE lower(uuid) = lower(?) AND deleted_at IS NULL');
+      for (const { yoyo_uuid, id, ...v } of keptVideos) {
+        const target = yoyo_uuid && idByUuid.get(yoyo_uuid);
+        if (!target) continue;
+        insertFrom('videos', videoCols, { ...v, yoyo_id: target.id });
+        videosKept++;
+      }
+      const now = nowSql();
+      const tomb = db.prepare('INSERT INTO yoyos (uuid, deleted_at, updated_at) VALUES (?, ?, ?)');
+      for (const r of vanished) tomb.run(r.uuid, r.deleted_at || now, now);
+      if (fieldRows) {
+        db.prepare('DELETE FROM field_defs').run();
+        for (const f of fieldRows) insertFrom('field_defs', fieldCols, f);
+      }
+      if (settingRows) {
+        const put = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+        for (const r of settingRows) put.run(r.key, String(r.value ?? ''));
+      }
+      // Every row gets a fresh change-feed position above anything a device has
+      // already seen, so sync clients re-pull the whole (replaced) collection.
+      for (const row of db.prepare('SELECT id FROM yoyos ORDER BY updated_at, id').all()) {
+        db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?').run(nextRev(), row.id);
+      }
+    })();
+  } catch (err) {
+    cleanStaging();
+    return res.status(400).json({ error: `Could not restore that backup (your collection was not changed): ${err.message}` });
+  }
+
+  // The database is in; now the staged photo files. Overwriting a file of the
+  // same name is expected (it's the same photo).
+  let photoFiles = 0;
+  for (const name of staged) {
+    try { fs.renameSync(path.join(staging, name), uploadPath(name)); photoFiles++; }
+    catch (err) { console.error('restore: could not move', name, err.message); }
+  }
+  cleanStaging();
+
   // A backup made before the uuid column existed restores rows without one —
   // give those a stable id so the unique index holds and they can sync later.
   backfillUuids(db);
   backfillPhotoUuids(db);
 
-  res.json({ yoyos: yoyoRows.length, photos: photoRows.length, videos: videoRows.length + videosKept, videosKept, photoFiles });
+  res.json({
+    yoyos: yoyoRows.length, photos: photoRows.length, videos: videoRows.length + videosKept, videosKept, photoFiles,
+    skipped: { photoRows: photoRowsIn - photoRows.length, videoRows: videoRowsIn - videoRows.length, files: filesSkipped },
+  });
 }
 
 // ---- Multer / error handling ----
