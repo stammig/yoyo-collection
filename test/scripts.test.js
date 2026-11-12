@@ -60,3 +60,18 @@ test('a database the app has not updated yet is refused, not migrated', () => {
   assert.throws(() => run('normalize-dates.mjs', file, '--apply'), /Start the app once/);
   assert.equal(hash(file), before);
 });
+
+test('seed-demo never touches DB_PATH and needs FORCE=1 exactly', () => {
+  const dir = tempDir();
+  const live = migratedDb((db) => db.prepare("INSERT INTO yoyos (uuid, brand, model) VALUES ('a0000000-0000-4000-8000-000000000003', 'Real', 'Collection')").run());
+  const liveHash = hash(live);
+  const demo = path.join(dir, 'demo.db');
+  const seed = (env) => execFileSync(process.execPath, ['seed-demo.mjs'], {
+    cwd: root, env: { ...process.env, DB_PATH: live, SEED_DB_PATH: demo, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  seed({ FORCE: '' });
+  assert.equal(hash(live), liveHash, 'DB_PATH (the real collection) is untouched');
+  assert.throws(() => seed({ FORCE: '0' }), /Refusing to overwrite/, 'FORCE=0 is not yes');
+  seed({ FORCE: '1' });
+  assert.equal(hash(live), liveHash);
+});

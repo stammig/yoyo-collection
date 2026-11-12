@@ -53,6 +53,11 @@ describe('partial updates (1D.2)', () => {
     after = await (await put(s, y.id, { custom: { [kB]: '' } })).json();
     assert.deepEqual(after.custom, { [kS]: 'Toxic' });
   });
+  test('"Not listed" is stored as an empty status', async () => {
+    const y = await (await s.api('/api/yoyos', json({ brand: 'Not', model: 'Listed', color: 'Red', sale_status: 'For Sale' }))).json();
+    const after = await (await put(s, y.id, { sale_status: 'Not listed' })).json();
+    assert.equal(after.sale_status, '');
+  });
   test('listing for sale stamps sale_listed_at in the SQL format the apps read', async () => {
     const y = await (await s.api('/api/yoyos', json({ brand: 'Sale', model: 'Stamp', color: 'Red' }))).json();
     const after = await (await put(s, y.id, { sale_status: 'For Sale', sale_price: 40 })).json();

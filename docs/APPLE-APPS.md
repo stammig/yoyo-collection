@@ -38,6 +38,17 @@ Built by `BackupExporter.swift` (`APPLE_SCHEMA` in `test/fixtures.js` copies it)
 - Zips are stored (not compressed), with correct CRC-32s and no Zip64. Restore
   now checks each entry's size and CRC-32.
 
+## Sync changes in 1.3.0
+
+The Apple apps don't call `/api/sync/push` or `/api/sync/changes`; those are
+Android's. Two 1.3.0 changes touch the publish anyway, and both keep it
+working:
+
+- `/api/sync/photos/<YOYO>/<PHOTO>` finds the yoyo and photo without regard to
+  uuid case. It still stores the file under the name in the URL.
+- `PUT /api/yoyos/:id` now changes only the fields it is sent. The apps don't
+  use it today; if a future version does, it can send just what changed.
+
 ## CSV
 
 The web CSV export now has a `uuid` column, which `CSVImporter.swift` already

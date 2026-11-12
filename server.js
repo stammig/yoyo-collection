@@ -269,6 +269,24 @@ function allowedDespiteReadOnly(req) {
   return isPublish(req) && isLoggedIn(req);
 }
 
+// The page runs only its own scripts: no inline <script>, no on*="" handlers
+// (app.js uses data-* attributes and delegated listeners instead), nothing
+// from other sites. Inline styles stay allowed (the UI sets them). Video
+// embeds may load from YouTube's no-cookie domain and Instagram.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  'frame-src https://www.youtube-nocookie.com https://www.instagram.com',
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  `frame-ancestors ${FRAME_ANCESTORS || "'self'"}`,
+].join('; ');
+
 function isCrossSite(req) {
   const site = req.headers['sec-fetch-site'];
   if (site === 'cross-site' || site === 'same-site') return true;
@@ -346,7 +364,7 @@ app.use((req, res, next) => {
   // FRAME_ANCESTORS names who may embed the app.
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('Content-Security-Policy', `frame-ancestors ${FRAME_ANCESTORS || "'self'"}`);
+  res.setHeader('Content-Security-Policy', CSP);
   if (!FRAME_ANCESTORS) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
 
   const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
@@ -558,6 +576,8 @@ function sanitizeYoyo(body) {
   for (const f of DAY_FIELDS) out[f] = normalizeDay(out[f]);
   out.condition = canonicalCondition(out.condition);
   out.composition = canonicalComposition(out.composition);
+  // "Not listed" is how the UI labels an empty status, never a value to store.
+  if (out.sale_status.toLowerCase() === 'not listed') out.sale_status = '';
   for (const f of NUMBER_FIELDS) out[f] = toNumber(body[f]);
   for (const f of BOOL_FIELDS) out[f] = toBool(body[f]) ? 1 : 0;
   return out;
@@ -2249,6 +2269,15 @@ app.use((err, _req, res, _next) => {
 
 const server = app.listen(PORT, () => {
   console.log(`🪀  Yoyo collection running at http://localhost:${PORT}`);
+  // A public READ_ONLY site with no password has no owner: nobody can sign in,
+  // so nobody can restore or edit from the browser. Usually that's the
+  // intent, but say so, since it's easy to set up by accident.
+  if (READ_ONLY && !LOGIN_ENABLED) {
+    console.warn('⚠️  READ_ONLY is on and ADMIN_PASSWORD is not set: nobody can sign in, so nobody can edit, back up or restore from the browser. Set ADMIN_PASSWORD to manage the site while visitors keep the read-only view.');
+  }
+  if (!READ_ONLY && !LOGIN_ENABLED && !AUTH_USER && !DEMO_MODE) {
+    console.warn('⚠️  No ADMIN_PASSWORD or AUTH_USER is set: anyone who can reach this server can edit, back up and restore. Fine on your own computer; set ADMIN_PASSWORD before putting it on the internet.');
+  }
   // Heal quietly after boot: titles for videos saved before oEmbed lookups
   // existed (posters self-heal lazily on render instead).
   setImmediate(() => backfillVideoTitles().catch((e) => console.warn('title backfill:', e.message)));

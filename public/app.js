@@ -95,7 +95,8 @@ function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'C
     const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(val); };
     const onKey = (e) => {
       if (e.key === 'Escape') { e.stopPropagation(); close(false); }
-      else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+      // Enter does what the focused button says: on Cancel it cancels.
+      else if (e.key === 'Enter') { e.preventDefault(); close(document.activeElement !== card.querySelector('[data-act="cancel"]')); }
     };
     document.addEventListener('keydown', onKey, true);
     backdrop.addEventListener('click', () => close(false));
@@ -104,6 +105,21 @@ function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'C
     card.querySelector('[data-act="ok"]').focus();
   });
 }
+
+// Page-wide handlers that replace inline on*="" attributes, which the
+// Content-Security-Policy doesn't allow:
+//   · <img data-fallback="url">: if the thumbnail fails, load the full image
+//   · <img data-fallback-remove>: if it fails, remove it
+//   · [data-stop-propagation]: a link inside a clickable row opens on its own
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement)) return;
+  if (img.dataset.fallback && !img.dataset.fellBack) { img.dataset.fellBack = '1'; img.src = img.dataset.fallback; }
+  else if (img.hasAttribute('data-fallback-remove')) img.remove();
+}, true);
+document.addEventListener('click', (e) => {
+  if (e.target instanceof Element && e.target.closest('[data-stop-propagation]')) e.stopPropagation();
+}, true);
 
 // Inline line-icon set (no emoji anywhere in the chrome).
 const SVG = {
@@ -170,10 +186,10 @@ const FIELD_DEFS = [
   { key: 'trade_value', label: 'Trade Value', fmt: money, num: true },
   { key: 'sold_date', label: 'Sold Date' },
   { key: 'buyer', label: 'Buyer' },
-  { key: 'weight_g', label: 'Weight', fmt: (v) => (v ? v + ' g' : ''), num: true },
-  { key: 'diameter_mm', label: 'Diameter', fmt: (v) => (v ? v + ' mm' : ''), num: true },
-  { key: 'width_mm', label: 'Width', fmt: (v) => (v ? v + ' mm' : ''), num: true },
-  { key: 'gap_mm', label: 'Gap', fmt: (v) => (v ? v + ' mm' : ''), num: true },
+  { key: 'weight_g', label: 'Weight', fmt: (v) => (v == null || v === '' ? '' : v + ' g'), num: true },
+  { key: 'diameter_mm', label: 'Diameter', fmt: (v) => (v == null || v === '' ? '' : v + ' mm'), num: true },
+  { key: 'width_mm', label: 'Width', fmt: (v) => (v == null || v === '' ? '' : v + ' mm'), num: true },
+  { key: 'gap_mm', label: 'Gap', fmt: (v) => (v == null || v === '' ? '' : v + ' mm'), num: true },
   { key: 'bearing_size', label: 'Bearing' },
   { key: 'response_type', label: 'Response' },
   { key: 'finish', label: 'Finish' },
@@ -447,7 +463,8 @@ function filteredYoyos() {
         .join(' ').toLowerCase().includes(q)
     );
   }
-  if (filters.brands.length) list = list.filter((y) => filters.brands.includes(y.brand));
+  // Yoyos with no brand are tallied under the "—" chip, so match that too.
+  if (filters.brands.length) list = list.filter((y) => filters.brands.includes(y.brand || '—'));
   if (filters.compositions.length) list = list.filter((y) => filters.compositions.includes(y.composition));
   if (filters.conditions.length) list = list.filter((y) => filters.conditions.includes(y.condition));
   if (filters.material) {
@@ -473,7 +490,7 @@ function filteredYoyos() {
     let r;
     if (DAY_KEYS.has(key)) { if ((r = cmpDays(av, bv, flip))) return r; }
     else if (key === 'favorite' || key === 'in_hand') r = (av ? 1 : 0) - (bv ? 1 : 0);
-    else if (numeric) r = (av ?? -Infinity) - (bv ?? -Infinity);
+    else if (numeric) r = cmpNum(av ?? -Infinity, bv ?? -Infinity); // -Infinity - -Infinity would be NaN
     else r = String(av || '').localeCompare(String(bv || ''));
     if (r === 0 && key !== 'brand') r = String(a.brand || '').localeCompare(String(b.brand || ''));
     return r * flip;
@@ -663,7 +680,7 @@ function dialHTML(value, label, tone = '') {
 function shelfHeroHTML(y) {
   const p = y.photos && y.photos[0];
   const media = p
-    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`
+    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" data-fallback="${esc(p.url)}">`
     : '<span class="placeholder"></span>';
   const sub = [y.brand, y.color, y.edition].filter(Boolean).join(' · ');
   const estVal = y.market_value != null ? money0(y.market_value) : (y.retail != null ? money0(y.retail) : '—');
@@ -704,7 +721,7 @@ function shelfGroupHTML(maker, items, featured) {
     const p = y.photos && y.photos[0];
     const feat = y.id === featured.id ? ' featured' : '';
     const media = p
-      ? `<img src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`
+      ? `<img src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" data-fallback="${esc(p.url)}">`
       : '<span class="placeholder"></span>';
     const sub = shelfSub(y);
     const editBtn = canEditState
@@ -774,7 +791,7 @@ function renderTiles(items) {
 // chosen in view.fields (as tags/meta text), price line, and sale/retired badges.
 function tileHTML(y) {
   const photo = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
     : '<span class="placeholder"></span>';
 
   // Selected fields shown as meta; price fields handled specially.
@@ -859,7 +876,7 @@ function renderRows(items) {
 
   const rows = items.map((y) => {
     const thumb = y.photos[0]
-      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
       : '<span class="row-thumb placeholder"></span>';
     const cells = cols.map((c) => cell(y, c.key, esc(fmtField(c.key, valueOf(y, c.key))), c.num ? 'num' : '')).join('');
     const selCell = canEditState ? `<td class="col-sel"><span class="sel-box ${selectedIds.has(y.id) ? 'checked' : ''}" data-sel="${y.id}"></span></td>` : '';
@@ -1443,7 +1460,7 @@ function renderSelectionBar() {
 // Duplicates every selected yoyo (all fields except identity/derived ones;
 // photos aren't copied), tagging each copy's model with "(copy)".
 async function bulkDuplicate() {
-  const ids = [...selectedIds];
+  const ids = selectedShownIds();
   if (!ids.length) return;
   if (demoGuard()) return;
   let ok = 0, fail = 0;
@@ -1472,16 +1489,21 @@ async function bulkDuplicate() {
   toast(`Duplicated ${ok} yoyo${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}.`, fail ? 'error' : 'ok');
 }
 // Deletes every selected yoyo, after one confirm dialog for the whole batch.
+// What's selected AND still shown in the Collection (see the sale bar's shown()).
+function selectedShownIds() {
+  const v = new Set(filteredYoyos().map((y) => y.id));
+  return [...selectedIds].filter((id) => v.has(id));
+}
 async function bulkDelete() {
-  const ids = [...selectedIds];
+  const ids = selectedShownIds();
   if (!ids.length) return;
   if (demoGuard()) return;
   if (!await confirmDialog({ title: `Delete ${ids.length} yoyo${ids.length === 1 ? '' : 's'}?`, message: 'This removes them and their photos. This can’t be undone.', confirmText: 'Delete', danger: true })) return;
-  let ok = 0;
-  for (const id of ids) { try { await api(`/api/yoyos/${id}`, { method: 'DELETE' }); ok++; } catch { /* keep going */ } }
+  let ok = 0, fail = 0;
+  for (const id of ids) { try { await api(`/api/yoyos/${id}`, { method: 'DELETE' }); ok++; } catch { fail++; } }
   setSelectMode(false);
   await loadAll();
-  toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}.`, 'ok');
+  toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}.`, fail ? 'error' : 'ok');
 }
 // Opens the "Edit N yoyos" dialog (BULK_FIELDS only) — every control defaults
 // to "No change" so the apply step only touches fields the user actually set.
@@ -1522,7 +1544,7 @@ function openBulkEdit() {
     });
     if (!Object.keys(changes).length) { toast('Choose at least one field to change.', 'error'); return; }
     close();
-    const ids = [...selectedIds];
+    const ids = selectedShownIds();
     let ok = 0, fail = 0;
     for (const id of ids) { try { await patchYoyo(id, changes); ok++; } catch { fail++; } }
     setSelectMode(false);
@@ -1586,7 +1608,14 @@ function promptDialog({ title = '', placeholder = '', confirmText = 'Save', valu
     const bd = document.createElement('div'); bd.className = 'modal-backdrop';
     overlay.appendChild(bd); overlay.appendChild(card); document.body.appendChild(overlay);
     const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(val); };
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } else if (e.key === 'Enter') { e.preventDefault(); close(input.value.trim() || null); } };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(null); }
+      // Enter does what the focused button says: on Cancel it cancels.
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        close(document.activeElement === card.querySelector('[data-act="cancel"]') ? null : (input.value.trim() || null));
+      }
+    };
     document.addEventListener('keydown', onKey, true);
     bd.onclick = () => close(null);
     card.querySelector('[data-act="cancel"]').onclick = () => close(null);
@@ -1687,7 +1716,7 @@ function trimNum(d) { d = Number(d); return d === Math.round(d) ? String(Math.ro
 // Small thumbnail (or a blank placeholder) for a yoyo, used in Arrivals/Insights rows.
 function thumbHTML(y, cls) {
   const p = (y.photos && y.photos[0]) ? y.photos[0] : null;
-  if (p) return `<img class="${cls}" src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'">`;
+  if (p) return `<img class="${cls}" src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" data-fallback="${esc(p.url)}">`;
   return `<div class="${cls}"></div>`;
 }
 // Simple horizontal bar chart (used on Insights) from [{ name, value, display }].
@@ -1870,6 +1899,7 @@ function arrivalRow(y, sub) {
       `<div class="arrival-name">${esc(y.brand)} ${esc(y.model)}</div>` +
       `<div class="arrival-sub">${esc(sub)}</div>` +
       `<div class="arrival-edit">` +
+        (y.tracking ? `<span class="arr-track-text">${esc(y.tracking)}</span>` : '') +
         `<input class="arr-field arr-track" data-track-input="${y.id}" value="${esc(y.tracking || '')}" placeholder="Tracking number" />` +
         `<input class="arr-field arr-eta" type="date" data-eta-input="${y.id}" value="${toDateInputValue(y.eta)}" />` +
         queryBtn +
@@ -1952,7 +1982,7 @@ function arrivalsCellHTML(y, c) {
   if (c.key === 'tracking') {
     const url = carrierTrackingURL(y.tracking);
     const inner = y.tracking
-      ? (url ? `<a href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(y.tracking)}</a>` : esc(y.tracking))
+      ? (url ? `<a href="${esc(url)}" target="_blank" rel="noopener" data-stop-propagation>${esc(y.tracking)}</a>` : esc(y.tracking))
       : '—';
     return `<td>${inner}</td>`;
   }
@@ -2075,7 +2105,13 @@ function renderArrivals() {
   } else {
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
     const upcoming = groups.filter((g) => g.day.getTime() >= start);
-    listHTML = `<div class="arrivals-block"><h3>Upcoming arrivals</h3>` +
+    // Still on order but past its ETA: these used to fall out of the list
+    // entirely, which is exactly when they need chasing.
+    const overdue = groups.filter((g) => g.day.getTime() < start);
+    listHTML = (overdue.length
+      ? `<div class="arrivals-block"><h3>Overdue</h3>` + overdue.flatMap((g) => g.items.map((y) => arrivalRow(y, relativeETA(g.day)))).join('') + `</div>`
+      : '') +
+      `<div class="arrivals-block"><h3>Upcoming arrivals</h3>` +
       (upcoming.length ? upcoming.flatMap((g) => g.items.map((y) => arrivalRow(y, relativeETA(g.day)))).join('') : '<p class="hint">Nothing scheduled.</p>') + `</div>`;
   }
   const nd = yoyos.filter((y) => !y.in_hand && !parseDay(y.eta));
@@ -2150,7 +2186,7 @@ function saleBadgeClass(status) {
 // price (or "Open to trade" when there's no asking price).
 function saleCardHTML(y) {
   const thumb = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
     : '<span class="placeholder"></span>';
   const price = y.sale_price != null && y.sale_price !== '' ? money(y.sale_price) : '';
   const wantsTrade = y.sale_status !== 'For Sale'; // Trade or Both
@@ -2257,7 +2293,7 @@ function saleFilteredSorted() {
   list.sort((a, b) => {
     let r;
     if (DAY_KEYS.has(key)) { if ((r = cmpDays(cellVal(a), cellVal(b), flip))) return r; }
-    else if (numeric) r = (cellVal(a) ?? -Infinity) - (cellVal(b) ?? -Infinity);
+    else if (numeric) r = cmpNum(cellVal(a) ?? -Infinity, cellVal(b) ?? -Infinity); // -Infinity - -Infinity would be NaN
     else r = String(cellVal(a) ?? '').localeCompare(String(cellVal(b) ?? ''));
     if (r === 0) r = String(a.brand || '').localeCompare(String(b.brand || ''));
     return r * flip;
@@ -2326,7 +2362,7 @@ function saleSelBoxHTML(y) {
 }
 function ownerSaleCardHTML(y) {
   const thumb = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
     : '<span class="placeholder"></span>';
   const wantsTrade = y.sale_status !== 'For Sale';
   const price = y.sale_price != null ? money(y.sale_price) : (wantsTrade ? 'Open to trade' : 'No price set');
@@ -2347,7 +2383,7 @@ function ownerSaleCardHTML(y) {
 function ownerSaleRowsHTML(items) {
   const rows = items.map((y) => {
     const thumb = y.photos[0]
-      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
       : '<span class="row-thumb placeholder"></span>';
     const selCell = saleSelBoxHTML(y);
     const d = daysListed(y);
@@ -2387,7 +2423,7 @@ function ownerSaleTableHTML(items) {
     cols.map(thCol).join('') + '<th></th>';
   const rows = items.map((y) => {
     const thumb = y.photos[0]
-      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
       : '<span class="row-thumb placeholder"></span>';
     const selCell = `<td class="col-sel">${saleSelBoxHTML(y)}</td>`;
     return `<tr data-id="${y.id}" class="${saleSelectedIds.has(y.id) ? 'selected' : ''}">
@@ -2443,10 +2479,13 @@ function renderSaleSelectionBar() {
     `<button type="button" class="btn btn-ghost btn-sm" data-act="done">Done</button>`;
   bar.querySelector('[data-act="all"]').onclick = () => { saleFilteredSorted().forEach((y) => saleSelectedIds.add(y.id)); renderSaleBody(); };
   bar.querySelector('[data-act="none"]').onclick = () => { saleSelectedIds.clear(); renderSaleBody(); };
-  bar.querySelector('[data-act="price"]').onclick = () => openSaleDiscountDialog([...saleSelectedIds]);
-  bar.querySelector('[data-act="status"]').onclick = () => openSaleStatusDialog([...saleSelectedIds]);
-  bar.querySelector('[data-act="copy"]').onclick = () => copyListingText([...saleSelectedIds]);
-  bar.querySelector('[data-act="del"]').onclick = () => bulkDeleteSale([...saleSelectedIds]);
+  // Bulk actions act on what's selected AND still shown: a filter change can
+  // hide selected items, and acting on what you can't see is a surprise.
+  const shown = () => { const v = new Set(saleFilteredSorted().map((y) => y.id)); return [...saleSelectedIds].filter((id) => v.has(id)); };
+  bar.querySelector('[data-act="price"]').onclick = () => openSaleDiscountDialog(shown());
+  bar.querySelector('[data-act="status"]').onclick = () => openSaleStatusDialog(shown());
+  bar.querySelector('[data-act="copy"]').onclick = () => copyListingText(shown());
+  bar.querySelector('[data-act="del"]').onclick = () => bulkDeleteSale(shown());
   bar.querySelector('[data-act="done"]').onclick = () => setSaleSelectMode(false);
 }
 async function bulkDeleteSale(ids) {
@@ -2455,11 +2494,11 @@ async function bulkDeleteSale(ids) {
     title: `Delete ${ids.length} yoyo${ids.length === 1 ? '' : 's'}?`,
     message: 'This removes them and their photos. This can’t be undone.', confirmText: 'Delete', danger: true,
   })) return;
-  let ok = 0;
-  for (const id of ids) { try { await api(`/api/yoyos/${id}`, { method: 'DELETE' }); ok++; } catch { /* keep going */ } }
+  let ok = 0, fail = 0;
+  for (const id of ids) { try { await api(`/api/yoyos/${id}`, { method: 'DELETE' }); ok++; } catch { fail++; } }
   setSaleSelectMode(false);
   await loadAll();
-  toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}.`, 'ok');
+  toast(`Deleted ${ok} yoyo${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}.`, fail ? 'error' : 'ok');
 }
 
 // Simple modal scaffold shared by the two bulk dialogs below (mirrors openBulkEdit's pattern).
@@ -2502,10 +2541,20 @@ function openSaleDiscountDialog(ids) {
       `<option value="pct-off-retail">% off retail</option>` +
       `<option value="fixed">Set fixed price</option></select></div>` +
     `<div class="be-row"><label>Value</label><input type="number" id="discValue" step="0.01" placeholder="e.g. 10" /></div>` +
+    `<p class="form-error hidden" id="discMsg" role="alert"></p>` +
     `<p class="hint">"% off retail" only applies to items with a retail price on file; others are skipped.</p>`,
     async (card, close) => {
       const action = card.querySelector('#discAction').value;
-      const val = Number(card.querySelector('#discValue').value);
+      const rawVal = card.querySelector('#discValue').value.trim();
+      // An empty box is not 0: Number('') is 0, which set every price to $0.
+      if (rawVal === '') {
+        const msg = card.querySelector('#discMsg');
+        msg.textContent = action === 'fixed' ? 'Enter a price first.' : 'Enter a percentage first.';
+        msg.classList.remove('hidden');
+        card.querySelector('#discValue').focus();
+        return;
+      }
+      const val = Number(rawVal);
       const validPct = action !== 'fixed' && val >= 0 && val <= 100;
       const validFixed = action === 'fixed' && val >= 0;
       if (!isFinite(val) || (!validPct && !validFixed)) {
@@ -2577,6 +2626,18 @@ function syncSaleControls() {
   if (saleView.mode === 'table') buildSaleFieldsPanel();
   buildViewsPanel('sale');
 }
+// "Copy listing" buttons, for the owner's views and the public grid alike.
+function wireCopyButtons(body) {
+  body.querySelectorAll('[data-copy]').forEach((btn) => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!await copyListingText([Number(btn.dataset.copy)])) return;
+    // Feedback right where the eye already is, not just in the far-corner toast.
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
+  }));
+}
 // Re-renders just the stats + item list + selection bar (never the toolbar
 // itself) — the function every seller-tools interaction calls.
 function renderSaleBody() {
@@ -2590,6 +2651,7 @@ function renderSaleBody() {
       ? `<p class="sale-intro">${items.length} yoyo${items.length === 1 ? '' : 's'} available — tap any for full specs and photos.</p>`
         + `<div class="sale-grid">${items.map(saleCardHTML).join('')}</div>`
       : '<div class="insight-note">Nothing listed for sale or trade right now — check back soon.</div>';
+    wireCopyButtons(body);
     const publicList = items.map((y) => y.id);
     body.querySelectorAll('.sale-card[data-id]').forEach((el) => {
       const id = Number(el.dataset.id);
@@ -2612,15 +2674,7 @@ function renderSaleBody() {
   } else {
     body.innerHTML = `<div class="sale-grid">${items.map(ownerSaleCardHTML).join('')}</div>`;
   }
-  body.querySelectorAll('[data-copy]').forEach((btn) => btn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!await copyListingText([Number(btn.dataset.copy)])) return;
-    // Feedback right where the eye already is, not just in the far-corner toast.
-    const prev = btn.textContent;
-    btn.textContent = '✓ Copied';
-    btn.disabled = true;
-    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
-  }));
+  wireCopyButtons(body);
   const saleList = items.map((y) => y.id);
   body.querySelectorAll('.sale-card[data-id], .sale-row[data-id], tr[data-id]').forEach((el) => {
     const id = Number(el.dataset.id);
@@ -2701,7 +2755,7 @@ function saleNet(y) {
 // amount or the trade's valuation.
 function soldCardHTML(y) {
   const thumb = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="${esc(y.model)}" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
     : '<span class="placeholder"></span>';
   const isTrade = y.trade_value != null;
   const amount = recoveredAmount(y);
@@ -2772,7 +2826,7 @@ function soldFilteredSorted() {
   items.sort((a, b) => {
     let r;
     if (DAY_KEYS.has(key)) { if ((r = cmpDays(soldSortValue(a, key), soldSortValue(b, key), flip))) return r; }
-    else if (numeric) r = (soldSortValue(a, key) ?? -Infinity) - (soldSortValue(b, key) ?? -Infinity);
+    else if (numeric) r = cmpNum(soldSortValue(a, key) ?? -Infinity, soldSortValue(b, key) ?? -Infinity); // -Infinity - -Infinity would be NaN
     else r = String(soldSortValue(a, key) ?? '').localeCompare(String(soldSortValue(b, key) ?? ''));
     if (r) return r * flip;
     return cmpDays(b.sold_date, a.sold_date, 1);   // tiebreak: most recent sale first
@@ -2796,7 +2850,7 @@ function soldTableHTML(items) {
   const head = '<th class="col-photo"></th>' + th('brand', 'Brand') + th('model', 'Model') + cols.map(thCol).join('');
   const rows = items.map((y) => {
     const thumb = y.photos[0]
-      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+      ? `<img class="row-thumb" src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" alt="" loading="lazy" decoding="async" data-fallback="${esc(y.photos[0].url)}" />`
       : '<span class="row-thumb placeholder"></span>';
     return `<tr data-id="${y.id}">
         <td class="col-photo">${thumb}</td>
@@ -2958,7 +3012,7 @@ function renderGallery() {
       : y.sale_status === 'Sold' ? '<span class="gal-badge sold">Sold</span>' : '';
     const fav = y.favorite ? `<span class="gal-fav">${SVG.star}</span>` : '';
     return `<button class="gallery-tile" data-gal="${y.id}" aria-label="${esc(y.brand)} ${esc(y.model)}">
-        <img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${esc(p.url)}'" />
+        <img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" decoding="async" data-fallback="${esc(p.url)}" />
         ${fav}${badge}
         <span class="gal-cap"><span class="gal-brand">${esc(y.brand) || '—'}</span><span class="gal-model">${esc(y.model)}</span></span>
       </button>`;
@@ -3010,7 +3064,7 @@ function yotdHTML(list) {
   if (!y) return '';
   const p = y.photos && y.photos[0];
   const media = p
-    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />`
+    ? `<img src="${esc(p.thumbUrl || p.url)}" alt="${esc(y.brand)} ${esc(y.model)}" loading="lazy" data-fallback="${esc(p.url)}" />`
     : '<span class="placeholder"></span>';
   const chips = [];
   if (y.composition) chips.push(esc(fmtField('composition', y.composition)));
@@ -3170,7 +3224,7 @@ function openDetail(id, list) {
 function detailHTML(y) {
   // ---- Hero summary (lead media + key facts) ----
   const lead = y.photos[0]
-    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" data-full="${esc(y.photos[0].url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(y.photos[0].url)}'" />`
+    ? `<img src="${esc(y.photos[0].thumbUrl || y.photos[0].url)}" data-full="${esc(y.photos[0].url)}" alt="" loading="lazy" data-fallback="${esc(y.photos[0].url)}" />`
     : '<span class="placeholder"></span>';
 
   const chips = [];
@@ -3212,7 +3266,7 @@ function detailHTML(y) {
   // Remaining photos (the first is the hero lead).
   const rest = y.photos.slice(1);
   const gallery = rest.length
-    ? `<div class="detail-gallery">${rest.map((p) => `<img src="${esc(p.thumbUrl || p.url)}" data-full="${esc(p.url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />`).join('')}</div>`
+    ? `<div class="detail-gallery">${rest.map((p) => `<img src="${esc(p.thumbUrl || p.url)}" data-full="${esc(p.url)}" alt="" loading="lazy" data-fallback="${esc(p.url)}" />`).join('')}</div>`
     : '';
 
   // Pricing + status live in the hero, so omit those groups here.
@@ -3791,7 +3845,7 @@ function updateHero() {
   const cond = form.condition.value.trim();
   const y = editingId ? yoyos.find((x) => x.id === editingId) : null;
   const photo = (y && y.photos && y.photos[0]) ? y.photos[0].url : null;
-  const thumb = photo ? `<img src="${photo}" alt="">` : '<span class="placeholder"></span>';
+  const thumb = photo ? `<img src="${esc(photo)}" alt="">` : '<span class="placeholder"></span>';
   const chips = [color, comp, cond].filter(Boolean).map((c) => `<span class="tag">${esc(c)}</span>`).join('');
   hero.innerHTML =
     `<div class="hero-thumb">${thumb}</div>` +
@@ -3858,7 +3912,7 @@ function renderPhotoStrip(photos) {
   photoStrip.innerHTML =
     photos.map((p, i) => `
       <div class="photo-thumb" draggable="true" data-pid="${p.id}">
-        <img src="${esc(p.thumbUrl || p.url)}" alt="" data-full="${esc(p.url)}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${esc(p.url)}'" />
+        <img src="${esc(p.thumbUrl || p.url)}" alt="" data-full="${esc(p.url)}" draggable="false" loading="lazy" data-fallback="${esc(p.url)}" />
         ${i === 0 ? '<span class="cover-badge">Cover</span>' : ''}
         <button type="button" class="photo-del" data-photo="${p.id}" title="Remove photo">✕</button>
         <div class="photo-move">
@@ -3907,17 +3961,36 @@ function wirePhotoDragDrop() {
 }
 
 // Saves a new photo order to the server and refreshes the strip + collection.
-async function persistPhotoOrder(ids) {
+// A drop that changes nothing doesn't save. Saves run one at a time, in order,
+// and only the newest one redraws the strip, so a slow earlier response can't
+// put back an order the user has already changed.
+let photoOrderQueue = Promise.resolve();
+let photoOrderSeq = 0;
+function currentPhotoOrder() {
+  const y = yoyos.find((x) => x.id === editingId);
+  return y ? y.photos.map((p) => p.id) : [];
+}
+function persistPhotoOrder(ids) {
   if (!editingId || ids.length < 2) return;
-  try {
-    const updated = await api(`/api/yoyos/${editingId}/photos/order`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
-    });
-    renderPhotoStrip(updated.photos);
-    renderVideoList(updated.videos);
-    updateHero();
-    await loadAll();
-  } catch (err) { toast('Could not save photo order: ' + err.message, 'error'); }
+  if (ids.join(',') === currentPhotoOrder().join(',')) return;
+  const target = editingId;
+  const seq = ++photoOrderSeq;
+  photoOrderQueue = photoOrderQueue.then(async () => {
+    try {
+      const updated = await api(`/api/yoyos/${target}/photos/order`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+      });
+      const y = yoyos.find((x) => x.id === target);
+      if (y) y.photos = updated.photos;
+      if (seq === photoOrderSeq && editingId === target) {
+        renderPhotoStrip(updated.photos);
+        renderVideoList(updated.videos);
+        updateHero();
+      }
+      if (seq === photoOrderSeq) await loadAll();
+    } catch (err) { toast('Could not save photo order: ' + err.message, 'error'); }
+  });
+  return photoOrderQueue;
 }
 function savePhotoOrder() {
   const ids = [...photoStrip.querySelectorAll('.photo-thumb')].map((el) => Number(el.dataset.pid));
@@ -3996,13 +4069,29 @@ function collectFormData() {
   data.favorite = form.favorite.checked;
   data.retired = form.retired.checked;
   data.custom = collectCustom();
+  // The trade value only means something for a yoyo sold by trade. Switching
+  // to Cash (or un-selling) hides the box, so clear it rather than keep a
+  // stale number the user can no longer see.
+  const isTrade = $('#saleTypeSeg')?.querySelector('.seg-btn.active')?.dataset.saleType === 'trade';
+  if (!(data.sale_status === 'Sold' && isTrade)) data.trade_value = '';
   delete data.id;
   return data;
 }
 
+let formSaving = false; // one save at a time: a double click must not create two yoyos
+function setFormSaving(on) {
+  formSaving = on;
+  for (const sel of ['#saveBtn', '#saveAddAnotherBtn']) { const b = $(sel); if (b) b.disabled = on; }
+}
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
+  // Read and reset "Save & add another" before any early return, so it can
+  // never stay armed for a later, ordinary save.
+  const another = addAnother; addAnother = false;
+  if (formSaving) return;
   if (demoGuard()) return;
+  setFormSaving(true);
+  try {
   // A link left in the Videos box would otherwise vanish when the modal closes
   // — fold it into the save. If it's a bad link, stop here with the form (and
   // all its edits) intact, rather than silently discarding what was pasted.
@@ -4019,7 +4108,6 @@ form.addEventListener('submit', async (e) => {
 
   const targetId = editingId; // capture now — editingId may be reassigned while we await below
   const isNew = !targetId;
-  const another = addAnother; addAnother = false;
   try {
     let saved;
     if (targetId) {
@@ -4057,6 +4145,9 @@ form.addEventListener('submit', async (e) => {
     }
   } catch (err) {
     toast(err.message, 'error');
+  }
+  } finally {
+    setFormSaving(false);
   }
 });
 
@@ -4108,6 +4199,7 @@ $('#deleteBtn').addEventListener('click', async () => {
   if (!await confirmDialog({ title: 'Delete this yoyo?', message: 'This removes the yoyo and its photos. This can’t be undone.', confirmText: 'Delete', danger: true })) return;
   try {
     await api(`/api/yoyos/${editingId}`, { method: 'DELETE' });
+    cameFromDetail = false; // there's no detail view to go back to: it's gone
     closeModal();
     await loadAll();
   } catch (err) {
@@ -4124,10 +4216,10 @@ async function uploadFiles(fileList) {
   if (!images.length) return;
   const fd = new FormData();
   for (const f of images) fd.append('photos', f);
+  const target = editingId; // the sheet may move to another yoyo while this uploads
   try {
-    const updated = await api(`/api/yoyos/${editingId}/photos`, { method: 'POST', body: fd });
-    renderPhotoStrip(updated.photos);
-    renderVideoList(updated.videos);
+    const updated = await api(`/api/yoyos/${target}/photos`, { method: 'POST', body: fd });
+    if (editingId === target) { renderPhotoStrip(updated.photos); renderVideoList(updated.videos); }
     await loadAll();
   } catch (err) {
     toast(err.message, 'error');
@@ -4183,7 +4275,7 @@ function videoCardHTML(v) {
   const title = v.title || `${label} video`;
   // posterUrl is the server's locally-cached copy of the provider thumbnail —
   // same-origin, so the "nothing loads from them until play" promise holds.
-  const poster = v.posterUrl ? `<img class="vid-thumb" src="${esc(v.posterUrl)}" alt="" loading="lazy" onerror="this.remove()" />` : '';
+  const poster = v.posterUrl ? `<img class="vid-thumb" src="${esc(v.posterUrl)}" alt="" loading="lazy" data-fallback-remove />` : '';
   return `<div class="vid-card${v.vertical ? ' vertical' : ''}" data-provider="${esc(v.provider)}">
       <button type="button" class="vid-poster${v.posterUrl ? ' has-thumb' : ''}" data-embed="${esc(v.embedUrl)}" data-title="${esc(title)}"
         aria-label="Play ${esc(title)} on ${esc(label)}">
@@ -4267,15 +4359,18 @@ async function addVideo() {
   if (!editingId) { toast('Save the yoyo first, then add a video.', 'error'); return false; }
   const url = $('#videoUrl').value.trim();
   if (!url) { toast('Paste a YouTube or Instagram link first.', 'error'); return false; }
+  const target = editingId; // the sheet may move to another yoyo while this saves
   try {
-    const updated = await api(`/api/yoyos/${editingId}/videos`, {
+    const updated = await api(`/api/yoyos/${target}/videos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, title: $('#videoTitle').value.trim() }),
     });
-    $('#videoUrl').value = '';
-    $('#videoTitle').value = '';
-    renderVideoList(updated.videos);
+    if (editingId === target) {
+      $('#videoUrl').value = '';
+      $('#videoTitle').value = '';
+      renderVideoList(updated.videos);
+    }
     await loadAll();
     toast('Video added.');
     return true;
