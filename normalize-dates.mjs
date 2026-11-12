@@ -12,10 +12,20 @@
 //   node normalize-dates.mjs                 # show what would change
 //   node normalize-dates.mjs --apply         # change it
 //   DB_PATH=/path/to/yoyos.db node normalize-dates.mjs --apply
-import db, { DB_PATH, nextRev } from './db.js';
+//
+// The app must have run once on this database first (it brings the schema up
+// to date). --apply saves a snapshot beside the database before writing.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openForScript, nextRev } from './sqlite.js';
 import { DAY_FIELDS, normalizeDay } from './dates.js';
 
+// Opened without running the app's migrations, so a dry run changes nothing.
+// --apply snapshots the database first (the path is printed).
+const DB_PATH = process.env.DB_PATH || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'yoyos.db');
 const apply = process.argv.includes('--apply');
+const { db, snapshot } = openForScript(DB_PATH, { apply, label: 'normalize-dates' });
+if (snapshot) console.log(`Snapshot saved: ${snapshot}\n`);
 const rows = db.prepare(
   `SELECT id, brand, model, ${DAY_FIELDS.join(', ')} FROM yoyos WHERE deleted_at IS NULL`
 ).all();
@@ -53,7 +63,7 @@ if (!changes.length) {
       const cols = Object.keys(fixed);
       db.prepare(
         `UPDATE yoyos SET ${cols.map((c) => `${c} = @${c}`).join(', ')}, updated_at = datetime('now'), rev = @rev WHERE id = @id`
-      ).run({ ...fixed, rev: nextRev(), id: row.id });
+      ).run({ ...fixed, rev: nextRev(db), id: row.id });
     }
   })();
   console.log(`\nUpdated ${changes.length} yoyos.`);

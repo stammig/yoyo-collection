@@ -345,6 +345,19 @@ function playViewIntro(v) {
 }
 let introPending = true; // fire the entrance animation once, after first data load
 
+// "Saved vs retail" counts only yoyos with both a price paid and a retail
+// price; one missing either would otherwise count its whole retail as saved
+// (or its whole price as a loss). The server's /api/stats uses the same rule.
+function savingsOf(list) {
+  let saved = 0, base = 0;
+  for (const y of list) {
+    if (y.retail == null || y.paid == null) continue;
+    saved += y.retail - y.paid;
+    base += y.retail;
+  }
+  return { saved, pct: base > 0 ? Math.round((saved / base) * 100) : 0 };
+}
+
 // Stats reflect whatever is currently filtered/shown.
 function renderStats(list) {
   let inHand = 0, paid = 0, retail = 0;
@@ -368,14 +381,14 @@ function renderStats(list) {
     return;
   }
 
-  const pctSaved = retail > 0 ? Math.round(((retail - paid) / retail) * 100) : 0;
+  const { saved, pct: pctSaved } = savingsOf(list);
   $('#stats').innerHTML = `
     <div class="stat-card ${filtered ? 'filtered' : ''}"><div class="stat-num">${count}</div><div class="stat-label">${countLabel}</div></div>
     <div class="stat-card"><div class="stat-num">${inHand}</div><div class="stat-label">In hand</div></div>
     <div class="stat-card"><div class="stat-num">${count - inHand}</div><div class="stat-label">On order</div></div>
     <div class="stat-card"><div class="stat-num">${money0(retail)}</div><div class="stat-label">Total retail</div></div>
     <div class="stat-card"><div class="stat-num">${money0(paid)}</div><div class="stat-label">Total paid</div></div>
-    <div class="stat-card"><div class="stat-num">${money0(retail - paid)}</div><div class="stat-label">Saved vs retail</div></div>
+    <div class="stat-card"><div class="stat-num">${money0(saved)}</div><div class="stat-label">Saved vs retail</div></div>
     <div class="stat-card"><div class="stat-num">${pctSaved}%</div><div class="stat-label">Percent saved</div></div>
   `;
 }
@@ -554,7 +567,7 @@ function renderLedgerBand(list) {
   const fig = (val, label, tone = '') => `<div class="band-fig ${tone}"><span class="band-num">${esc(val)}</span><span class="band-label">${esc(label)}</span></div>`;
   band.innerHTML = `<div class="band-figs">${
     fig(money0(paid), 'Total paid')
-    + fig(money0(retail - paid), 'Saved vs retail')
+    + fig(money0(savingsOf(list).saved), 'Saved vs retail')
     + fig(money0(retail), 'Retail value')
     + fig(money0(recovered), 'Recovered on sales', 'gold')
   }</div><div class="band-actions">

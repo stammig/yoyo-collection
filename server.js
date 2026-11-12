@@ -952,7 +952,7 @@ app.post('/api/yoyos', (req, res) => {
   growSelectOptions(customObj);
   y.custom = JSON.stringify(customObj);
   y.uuid = crypto.randomUUID();
-  y.sale_listed_at = FOR_SALE_STATUSES.has(y.sale_status) ? new Date().toISOString() : null;
+  y.sale_listed_at = FOR_SALE_STATUSES.has(y.sale_status) ? nowSql() : null;
   let info;
   db.transaction(() => {
     y.rev = nextRev();
@@ -962,29 +962,48 @@ app.post('/api/yoyos', (req, res) => {
   res.status(201).json(decorate(row));
 });
 
+// Updates only the fields the request includes. A field left out is kept as it
+// is; to clear one, send it empty. Custom fields merge the same way: a key
+// sent empty (or false) is removed, a key left out is kept. The web form sends
+// every field, so for it this is the same as a full replace.
 app.put('/api/yoyos/:id', (req, res) => {
-  const existing = db.prepare('SELECT sale_status, sale_listed_at FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  const existing = db.prepare('SELECT * FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  const y = sanitizeYoyo(req.body);
-  const customObj = sanitizeCustom(req.body.custom);
-  growSelectOptions(customObj);
-  y.custom = JSON.stringify(customObj);
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const y = sanitizeYoyo(body);
+  const present = WRITE_COLS.filter((c) => Object.hasOwn(body, c));
+  const params = { id: existing.id };
+  for (const c of present) params[c] = y[c];
+
+  const assign = present.map((c) => `${c} = @${c}`);
+  if (body.custom && typeof body.custom === 'object' && !Array.isArray(body.custom)) {
+    let merged = {};
+    try { merged = JSON.parse(existing.custom || '{}'); } catch { /* start clean */ }
+    const incoming = sanitizeCustom(body.custom);
+    for (const k of Object.keys(body.custom)) if (!Object.hasOwn(incoming, k)) delete merged[k];
+    Object.assign(merged, incoming);
+    growSelectOptions(incoming);
+    params.custom = JSON.stringify(merged);
+    assign.push('custom = @custom');
+  }
+
   // Stamp sale_listed_at the moment a yoyo first goes live (wasn't for-sale,
   // now is); clear it on unlisting; otherwise leave it alone — this is what
   // lets the seller tools sort/flag by "days listed" without the client
   // needing to know or send this timestamp at all.
+  const status = present.includes('sale_status') ? y.sale_status : existing.sale_status;
   const wasListed = FOR_SALE_STATUSES.has(existing.sale_status);
-  const nowListed = FOR_SALE_STATUSES.has(y.sale_status);
-  y.sale_listed_at = nowListed
-    ? (wasListed ? existing.sale_listed_at : new Date().toISOString())
-    : (y.sale_status === '' ? null : existing.sale_listed_at);
-  const assignments = WRITE_COLS_C.map((c) => `${c} = @${c}`).join(', ');
+  const nowListed = FOR_SALE_STATUSES.has(status);
+  params.sale_listed_at = nowListed
+    ? (wasListed ? existing.sale_listed_at : nowSql())
+    : (status === '' ? null : existing.sale_listed_at);
+  assign.push('sale_listed_at = @sale_listed_at');
+
   db.transaction(() => {
-    db.prepare(
-      `UPDATE yoyos SET ${assignments}, sale_listed_at = @sale_listed_at, updated_at = datetime('now'), rev = @rev WHERE id = @id`
-    ).run({ ...y, rev: nextRev(), id: Number(req.params.id) });
+    params.rev = nextRev();
+    db.prepare(`UPDATE yoyos SET ${assign.join(', ')}, updated_at = datetime('now'), rev = @rev WHERE id = @id`).run(params);
   })();
-  const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT * FROM yoyos WHERE id = ?').get(existing.id);
   res.json(decorate(row));
 });
 
@@ -993,23 +1012,31 @@ app.delete('/api/yoyos/:id', (req, res) => {
   const existing = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
-  // Free the disk now (a tombstone doesn't need its photos) — remove both the
-  // full images and their thumbnails, then drop the photo rows.
-  const photos = db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(req.params.id);
+  // Keep the yoyo row as a tombstone (deleted_at set) so the deletion propagates
+  // to other devices on sync, rather than re-appearing from a device that still has it.
+  const photos = db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id);
+  const videos = db.prepare('SELECT provider, embed_ref FROM videos WHERE yoyo_id = ?').all(existing.id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(existing.id);
+    db.prepare('DELETE FROM videos WHERE yoyo_id = ?').run(existing.id);
+    db.prepare("UPDATE yoyos SET deleted_at = datetime('now'), updated_at = datetime('now'), rev = ? WHERE id = ?")
+      .run(nextRev(), existing.id);
+  })();
+  // Files go only once the database change has committed (a tombstone doesn't
+  // need its photos, thumbnails or video posters).
+  removePhotoFiles(photos);
+  cleanupVidThumbs(videos);
+  res.json({ ok: true });
+});
+
+// Removes photo files and their thumbnails. Call only after the database
+// change that dropped their rows has committed.
+function removePhotoFiles(photos) {
   for (const p of photos) {
     fs.rm(uploadPath(p.filename), { force: true }, () => {});
     fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
   }
-  // Keep the yoyo row as a tombstone (deleted_at set) so the deletion propagates
-  // to other devices on sync, rather than re-appearing from a device that still has it.
-  db.transaction(() => {
-    db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM videos WHERE yoyo_id = ?').run(req.params.id);
-    db.prepare("UPDATE yoyos SET deleted_at = datetime('now'), updated_at = datetime('now'), rev = ? WHERE id = ?")
-      .run(nextRev(), req.params.id);
-  })();
-  res.json({ ok: true });
-});
+}
 
 // ---- API: photos ----
 
@@ -1201,26 +1228,33 @@ const SYNC_UPSERT_COLS = [...WRITE_COLS_C, 'uuid', 'created_at', 'updated_at', '
 const SYNC_INSERT_SQL = `INSERT INTO yoyos (${SYNC_UPSERT_COLS.join(', ')}) VALUES (${SYNC_UPSERT_COLS.map((c) => `@${c}`).join(', ')})`;
 const SYNC_UPDATE_SQL = `UPDATE yoyos SET ${[...WRITE_COLS_C, 'updated_at', 'deleted_at'].map((c) => `${c} = @${c}`).join(', ')}, rev = @rev WHERE id = @id`;
 
+// A pushed photo or video list is applied only when it is a list and every
+// entry has a valid uuid. Anything else ("photos" missing, null, an object, or
+// a list with one bad entry) leaves the yoyo's photos exactly as they are —
+// it must never be read as "this yoyo has no photos" and delete them all.
+// uuids are compared without case: Android sends lower-case, the Apple apps
+// upper-case.
+const usableList = (list) => Array.isArray(list) && list.every((m) => UUID_RE.test(String(m?.uuid || '')));
+
 // Reconciles a live yoyo's photo rows against a pushed manifest
 // [{uuid, sort_order, ext}]. Returns the uuids whose files the client must
-// upload (rows exist so other devices see the manifest; bytes follow).
-function applyPhotoManifest(yoyoId, manifest) {
+// upload (rows exist so other devices see the manifest; bytes follow). Rows it
+// drops are added to `removed`, whose files the caller deletes after commit.
+function applyPhotoManifest(yoyoId, manifest, removed) {
   const missing = [];
-  const entries = [];
-  for (const m of Array.isArray(manifest) ? manifest : []) {
-    if (!UUID_RE.test(String(m?.uuid || ''))) continue;
-    const ext = MANIFEST_EXTS.has(String(m?.ext || '').toLowerCase()) ? String(m.ext).toLowerCase() : 'jpg';
-    entries.push({ uuid: m.uuid, sort_order: Number(m.sort_order) || 0, ext });
-  }
-  const keep = new Set(entries.map((e) => e.uuid));
+  const entries = manifest.map((m) => ({
+    uuid: m.uuid,
+    sort_order: Number(m.sort_order) || 0,
+    ext: MANIFEST_EXTS.has(String(m?.ext || '').toLowerCase()) ? String(m.ext).toLowerCase() : 'jpg',
+  }));
+  const keep = new Set(entries.map((e) => e.uuid.toLowerCase()));
   for (const p of db.prepare('SELECT * FROM photos WHERE yoyo_id = ?').all(yoyoId)) {
-    if (keep.has(p.uuid)) continue;
+    if (keep.has(String(p.uuid).toLowerCase())) continue;
     db.prepare('DELETE FROM photos WHERE id = ?').run(p.id);
-    fs.rm(uploadPath(p.filename), { force: true }, () => {});
-    fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
+    removed.push(p);
   }
   for (const e of entries) {
-    const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(e.uuid);
+    const row = db.prepare('SELECT * FROM photos WHERE lower(uuid) = lower(?)').get(e.uuid);
     if (row) {
       if (row.yoyo_id !== yoyoId) continue; // uuid belongs to another yoyo — ignore
       db.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').run(e.sort_order, row.id);
@@ -1238,8 +1272,7 @@ function applyPhotoManifest(yoyoId, manifest) {
 // applyPhotoManifest. Videos carry no files, so there's nothing to report back.
 function applyVideoList(yoyoId, list) {
   const entries = [];
-  for (const v of Array.isArray(list) ? list : []) {
-    if (!UUID_RE.test(String(v?.uuid || ''))) continue;
+  for (const v of list) {
     const parsed = parseVideoUrl(v?.url);
     if (!parsed) continue; // unsupported or malformed link — don't store it
     entries.push({
@@ -1250,13 +1283,13 @@ function applyVideoList(yoyoId, list) {
       url: parsed.url.slice(0, 2048), // normalized absolute form, never the raw paste
     });
   }
-  const keep = new Set(entries.map((e) => e.uuid));
+  const keep = new Set(entries.map((e) => e.uuid.toLowerCase()));
   const removed = [];
   for (const row of db.prepare('SELECT id, uuid, provider, embed_ref FROM videos WHERE yoyo_id = ?').all(yoyoId)) {
-    if (!keep.has(row.uuid)) { removed.push(row); db.prepare('DELETE FROM videos WHERE id = ?').run(row.id); }
+    if (!keep.has(String(row.uuid).toLowerCase())) { removed.push(row); db.prepare('DELETE FROM videos WHERE id = ?').run(row.id); }
   }
   for (const e of entries) {
-    const row = db.prepare('SELECT * FROM videos WHERE uuid = ?').get(e.uuid);
+    const row = db.prepare('SELECT * FROM videos WHERE lower(uuid) = lower(?)').get(e.uuid);
     if (row) {
       if (row.yoyo_id !== yoyoId) continue; // uuid belongs to another yoyo — ignore
       db.prepare(`UPDATE videos SET provider = ?, embed_ref = ?, url = ?, title = ?,
@@ -1278,6 +1311,14 @@ function applyVideoList(yoyoId, list) {
   });
 }
 
+// A record applies even when its photo or video list was unusable; the result
+// says which list was ignored so the client can resend it.
+function listResult(r, photosOk, videosOk) {
+  if (!photosOk) r.photosIgnored = 'bad-photo-list';
+  if (!videosOk) r.videosIgnored = 'bad-video-list';
+  return r;
+}
+
 app.post('/api/sync/push', (req, res) => {
   const incoming = Array.isArray(req.body?.yoyos) ? req.body.yoyos : null;
   if (!incoming) return res.status(400).json({ error: 'Body must be { yoyos: [...] }.' });
@@ -1285,6 +1326,7 @@ app.post('/api/sync/push', (req, res) => {
 
   const now = nowSql();
   const results = [];
+  const removedPhotos = []; // files to delete once the transaction commits
 
   db.transaction(() => {
     for (const rec of incoming) {
@@ -1293,6 +1335,10 @@ app.post('/api/sync/push', (req, res) => {
       const updatedAt = acceptTimestamp(rec.updated_at, now);
       if (!updatedAt) { results.push({ uuid, applied: false, reason: 'bad-timestamp' }); continue; }
       const deletedAt = rec.deleted_at == null ? null : acceptTimestamp(rec.deleted_at, now);
+      // A deleted_at that isn't a timestamp is refused, never read as "live".
+      if (rec.deleted_at != null && !deletedAt) { results.push({ uuid, applied: false, reason: 'bad-timestamp' }); continue; }
+      const photosOk = rec.photos === undefined || usableList(rec.photos);
+      const videosOk = rec.videos === undefined || usableList(rec.videos);
       const createdAt = acceptTimestamp(rec.created_at, now) || now;
 
       const y = sanitizeYoyo(rec);
@@ -1300,7 +1346,7 @@ app.post('/api/sync/push', (req, res) => {
       growSelectOptions(customObj);
       y.custom = JSON.stringify(customObj);
 
-      const existing = db.prepare('SELECT * FROM yoyos WHERE uuid = ?').get(uuid);
+      const existing = db.prepare('SELECT * FROM yoyos WHERE lower(uuid) = lower(?)').get(uuid);
       if (existing) {
         // Last-writer-wins: strictly newer applies; ties go to the server (the
         // loser's device marks itself clean and re-pulls the winning copy).
@@ -1310,19 +1356,16 @@ app.post('/api/sync/push', (req, res) => {
         }
         // A pushed delete mirrors DELETE /api/yoyos/:id — photo files go now.
         if (deletedAt && !existing.deleted_at) {
-          for (const p of db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id)) {
-            fs.rm(uploadPath(p.filename), { force: true }, () => {});
-            fs.rm(uploadPath(thumbName(p.filename)), { force: true }, () => {});
-          }
+          removedPhotos.push(...db.prepare('SELECT filename FROM photos WHERE yoyo_id = ?').all(existing.id));
           db.prepare('DELETE FROM photos WHERE yoyo_id = ?').run(existing.id);
           db.prepare('DELETE FROM videos WHERE yoyo_id = ?').run(existing.id);
         }
         const rev = nextRev();
         db.prepare(SYNC_UPDATE_SQL).run({ ...y, updated_at: updatedAt, deleted_at: deletedAt, rev, id: existing.id });
-        const missingPhotos = (!deletedAt && rec.photos !== undefined)
-          ? applyPhotoManifest(existing.id, rec.photos) : [];
-        if (!deletedAt && rec.videos !== undefined) applyVideoList(existing.id, rec.videos);
-        results.push({ uuid, applied: true, rev, missingPhotos });
+        const missingPhotos = (!deletedAt && rec.photos !== undefined && photosOk)
+          ? applyPhotoManifest(existing.id, rec.photos, removedPhotos) : [];
+        if (!deletedAt && rec.videos !== undefined && videosOk) applyVideoList(existing.id, rec.videos);
+        results.push(listResult({ uuid, applied: true, rev, missingPhotos }, photosOk, videosOk));
       } else {
         // New to the server. Tombstones insert too: a device that still holds
         // the record must learn about the delete on its next pull.
@@ -1330,13 +1373,14 @@ app.post('/api/sync/push', (req, res) => {
         const info = db.prepare(SYNC_INSERT_SQL).run({
           ...y, uuid, created_at: createdAt, updated_at: updatedAt, deleted_at: deletedAt, rev,
         });
-        const missingPhotos = (!deletedAt && rec.photos !== undefined)
-          ? applyPhotoManifest(info.lastInsertRowid, rec.photos) : [];
-        if (!deletedAt && rec.videos !== undefined) applyVideoList(info.lastInsertRowid, rec.videos);
-        results.push({ uuid, applied: true, rev, missingPhotos });
+        const missingPhotos = (!deletedAt && rec.photos !== undefined && photosOk)
+          ? applyPhotoManifest(info.lastInsertRowid, rec.photos, removedPhotos) : [];
+        if (!deletedAt && rec.videos !== undefined && videosOk) applyVideoList(info.lastInsertRowid, rec.videos);
+        results.push(listResult({ uuid, applied: true, rev, missingPhotos }, photosOk, videosOk));
       }
     }
   })();
+  removePhotoFiles(removedPhotos);
 
   res.json({ serverTime: nowSql(), latestRev: currentRev(), results });
 });
@@ -1366,7 +1410,7 @@ app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
   next();
 }, uploadSyncPhoto.single('photo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No photo uploaded.' });
-  const yoyo = db.prepare('SELECT id FROM yoyos WHERE uuid = ? AND deleted_at IS NULL').get(req.params.yoyoUuid);
+  const yoyo = db.prepare('SELECT id FROM yoyos WHERE lower(uuid) = lower(?) AND deleted_at IS NULL').get(req.params.yoyoUuid);
   if (!yoyo) {
     // basename() keeps this strictly inside UPLOAD_DIR even though the filename
     // is already a validated uuid (see the UUID_RE guard above).
@@ -1376,7 +1420,7 @@ app.post('/api/sync/photos/:yoyoUuid/:photoUuid', (req, res, next) => {
 
   let rev;
   db.transaction(() => {
-    const row = db.prepare('SELECT * FROM photos WHERE uuid = ?').get(req.params.photoUuid);
+    const row = db.prepare('SELECT * FROM photos WHERE lower(uuid) = lower(?)').get(req.params.photoUuid);
     if (row && row.yoyo_id === yoyo.id) {
       db.prepare('UPDATE photos SET filename = ? WHERE id = ?').run(req.file.filename, row.id);
     } else if (!row) {
@@ -1541,15 +1585,17 @@ app.put('/api/fields/:id', (req, res) => {
 app.delete('/api/fields/:id', (req, res) => {
   const def = db.prepare('SELECT * FROM field_defs WHERE id = ?').get(req.params.id);
   if (!def) return res.status(404).json({ error: 'Not found' });
-  db.prepare('DELETE FROM field_defs WHERE id = ?').run(def.id);
-  // Strip this field's values out of every yoyo's custom JSON.
+  // Remove the definition and strip its values from every yoyo in one
+  // transaction. Each changed yoyo gets a new rev and updated_at so synced
+  // devices drop the value too.
   const rows = db.prepare('SELECT id, custom FROM yoyos').all();
-  const upd = db.prepare('UPDATE yoyos SET custom = ? WHERE id = ?');
+  const upd = db.prepare("UPDATE yoyos SET custom = ?, updated_at = datetime('now'), rev = ? WHERE id = ?");
   db.transaction(() => {
+    db.prepare('DELETE FROM field_defs WHERE id = ?').run(def.id);
     for (const r of rows) {
       try {
         const o = JSON.parse(r.custom || '{}');
-        if (def.key in o) { delete o[def.key]; upd.run(JSON.stringify(o), r.id); }
+        if (Object.hasOwn(o, def.key)) { delete o[def.key]; upd.run(JSON.stringify(o), nextRev(), r.id); }
       } catch { /* ignore */ }
     }
   })();
@@ -1566,7 +1612,7 @@ app.get('/api/stats', (req, res) => {
               COALESCE(SUM(CASE WHEN in_hand = 0 THEN 1 ELSE 0 END), 0) AS on_order,
               COALESCE(SUM(paid), 0)               AS total_paid,
               COALESCE(SUM(retail), 0)             AS total_retail,
-              COALESCE(SUM(COALESCE(retail, 0) - COALESCE(paid, 0)), 0) AS total_saved
+              COALESCE(SUM(CASE WHEN retail IS NOT NULL AND paid IS NOT NULL THEN retail - paid END), 0) AS total_saved
        FROM yoyos WHERE deleted_at IS NULL`
     )
     .get();
