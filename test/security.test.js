@@ -111,6 +111,12 @@ describe('share page (1C.1, 1C.3)', () => {
     assert.equal((await s.api(`/api/yoyos/${id}`)).status, 404);
     assert.equal((await s.api(`/api/yoyos/${id}`, { headers: bearer })).status, 200, 'the owner still sees it');
   });
+  test('public stats do not count Sold yoyos', async () => {
+    const owner = await (await s.api('/api/stats', { headers: bearer })).json();
+    const pub = await (await s.api('/api/stats')).json();
+    assert.ok(pub.count < owner.count, `public ${pub.count} vs owner ${owner.count}`);
+    assert.ok(!('total_paid' in pub));
+  });
   test('the asking price shows only while listed', async () => {
     const id = await add({ brand: 'Listed', model: 'One', color: 'Red', sale_status: 'For Sale', sale_price: 50, paid: 40 });
     const y = await (await s.api(`/api/yoyos/${id}`)).json();

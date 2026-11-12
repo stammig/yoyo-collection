@@ -530,10 +530,22 @@ const BOOL_FIELDS = ['in_hand', 'favorite', 'retired'];
 const WRITE_COLS = [...TEXT_FIELDS, ...NUMBER_FIELDS, ...BOOL_FIELDS];
 
 // Pull a number out of strings like "$85.00", "64.60 g", "56.55 mm".
+// One number, optionally with a currency sign, thousands commas and a unit
+// ("$1,234.50", "67.5g", "56 mm", "-3"). Anything with a second number in it
+// ("1.2.3", "10-20", "5.5g (2)") is not guessed at: it's left empty.
 function toNumber(v) {
   if (v === '' || v == null) return null;
-  const cleaned = String(v).replace(/[^0-9.\-]/g, '');
-  return cleaned === '' || isNaN(Number(cleaned)) ? null : Number(cleaned);
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const t = String(v).trim().replace(/^[$€£¥]\s*/, '').replace(/,(?=\d{3}(?:\D|$))/g, '');
+  const m = t.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([A-Za-z%]*)\.?$/);
+  return m ? Number(m[1]) : null;
+}
+// Yes/no from a form, a sync client or a spreadsheet cell. "0", "No", "false"
+// and an empty cell are all no.
+function toBool(v) {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  return /^(x|1|true|yes|y|on|★|favou?rite)$/i.test(String(v ?? '').trim());
 }
 
 // Coerces a raw request body into a { column: value } map matching WRITE_COLS,
@@ -547,7 +559,7 @@ function sanitizeYoyo(body) {
   out.condition = canonicalCondition(out.condition);
   out.composition = canonicalComposition(out.composition);
   for (const f of NUMBER_FIELDS) out[f] = toNumber(body[f]);
-  for (const f of BOOL_FIELDS) out[f] = body[f] ? 1 : 0;
+  for (const f of BOOL_FIELDS) out[f] = toBool(body[f]) ? 1 : 0;
   return out;
 }
 
@@ -869,7 +881,7 @@ function sanitizeCustom(input) {
     const v = src[d.key];
     if (v === undefined || v === null || v === '') continue;
     if (d.type === 'number') { const n = toNumber(v); if (n != null) out[d.key] = n; }
-    else if (d.type === 'boolean') { if (v === true || v === 1 || /^(1|true|yes|x)$/i.test(String(v))) out[d.key] = true; }
+    else if (d.type === 'boolean') { if (toBool(v)) out[d.key] = true; }
     else if (d.type === 'select') { const s = String(v).trim(); if (s) out[d.key] = s; } // new values allowed (see growSelectOptions)
     else out[d.key] = String(v).trim();
   }
@@ -1565,8 +1577,16 @@ app.get('/api/stats', (req, res) => {
        FROM yoyos WHERE deleted_at IS NULL GROUP BY brand ORDER BY count DESC, brand`
     )
     .all();
-  // Public viewers don't get financial / ownership totals.
-  if (!isOwner(req)) return res.json({ count: totals.count, byBrand });
+  // Public viewers get only a count by brand, and Sold yoyos aren't in it
+  // (they aren't part of the public collection).
+  if (!isOwner(req)) {
+    const visible = db.prepare(
+      `SELECT CASE WHEN brand = '' THEN 'Unknown' ELSE brand END AS brand, COUNT(*) AS count
+       FROM yoyos WHERE deleted_at IS NULL AND lower(trim(sale_status)) != 'sold'
+       GROUP BY brand ORDER BY count DESC, brand`
+    ).all();
+    return res.json({ count: visible.reduce((n, b) => n + b.count, 0), byBrand: visible });
+  }
   res.json({ ...totals, byBrand });
 });
 
@@ -1643,6 +1663,17 @@ function exportValue(header, y, base) {
   }
 }
 
+// A cell a spreadsheet would run as a formula gets a leading ' so it opens as
+// text. Plain numbers ("-5", "+1") and ordinary text ("- small ding") are left
+// alone, so the file stays readable by the Apple apps' importer, which keeps
+// values exactly as written. The web importer removes the ' again.
+const FORMULA_START = /^(?:[=@\t\r]|[+-](?![\d.\s]|$))/;
+function escapeFormula(v) {
+  const t = v == null ? '' : String(v);
+  return FORMULA_START.test(t) ? `'${t}` : t;
+}
+const unescapeFormula = (v) => (typeof v === 'string' && /^'(?:[=@\t\r+-])/.test(v) ? v.slice(1) : v);
+
 app.get('/api/export.csv', (req, res) => {
   if (!isOwner(req)) return res.status(403).json({ error: 'Log in to export.' });
   const rows = db.prepare('SELECT * FROM yoyos WHERE deleted_at IS NULL ORDER BY brand, model, color').all();
@@ -1654,7 +1685,7 @@ app.get('/api/export.csv', (req, res) => {
   const headers = [
     ...CSV_MAP.filter(([h]) => h !== 'Photos' && h !== 'id').map(([h]) => h),
     ...defs.map((d) => d.label),
-    'Photos', 'id',
+    'Photos', 'id', 'uuid',
   ];
 
   const records = rows.map((y) => {
@@ -1670,9 +1701,12 @@ app.get('/api/export.csv', (req, res) => {
         const d = defByLabel.get(h);
         const v = custom[d.key];
         rec[h] = d.type === 'boolean' ? (v ? 'Yes' : '') : (v == null ? '' : String(v));
+      } else if (h === 'uuid') {
+        rec[h] = y.uuid || '';
       } else {
         rec[h] = exportValue(h, y, base);
       }
+      rec[h] = escapeFormula(rec[h]);
     }
     return rec;
   });
@@ -1706,7 +1740,9 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
   const customByHeader = new Map(loadFieldDefs().map((d) => [d.label.toLowerCase().trim(), d]));
 
   const insertSql = db.prepare(INSERT_SQL);
-  const findSql = db.prepare('SELECT id FROM yoyos WHERE id = ? AND deleted_at IS NULL');
+  const findSql = db.prepare('SELECT id, brand, model FROM yoyos WHERE id = ? AND deleted_at IS NULL');
+  const findByUuid = db.prepare('SELECT id FROM yoyos WHERE lower(uuid) = lower(?) AND deleted_at IS NULL');
+  const uuidTaken = db.prepare('SELECT 1 FROM yoyos WHERE lower(uuid) = lower(?)');
   const getCustomSql = db.prepare('SELECT custom FROM yoyos WHERE id = ?');
   const matchByIdentity = db.prepare(
     `SELECT id FROM yoyos
@@ -1752,10 +1788,14 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
       // Translate the row's headers into our internal field names first.
       const mapped = {};
       const customIn = {};
-      let rawId = '';
-      for (const [key, value] of Object.entries(rec)) {
+      let rawId = '', rawUuid = '';
+      const clearedCustom = [];
+      for (const [key, raw] of Object.entries(rec)) {
+        const value = unescapeFormula(raw);
         const norm = String(key).toLowerCase().trim();
         const field = headerToField[norm];
+        if (norm === 'uuid') { rawUuid = String(value || '').trim(); continue; }
+        if (customByHeader.has(norm) && !field && String(value ?? '').trim() === '') clearedCustom.push(customByHeader.get(norm).key);
         if (field === 'id') rawId = value;
         else if (field) mapped[field] = value;
         else if (customByHeader.has(norm)) customIn[customByHeader.get(norm).key] = value;
@@ -1772,9 +1812,20 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
       // totals / summary / title footer rows, which have no brand or model).
       if (!y.brand && !y.model) { skipped++; continue; }
 
-      let id = /^\d+$/.test(String(rawId ?? '').trim()) ? Number(rawId) : null;
-      // No id (e.g. importing a fresh spreadsheet): match an existing yoyo by
-      // brand + model + color so re-imports update instead of duplicating.
+      // Match in order of how sure we can be: the uuid (written by this app's
+      // export and the Apple and Android apps'), then the numeric id but only
+      // if that row is the same brand and model, then brand + model + color.
+      // A yoyo can be claimed by one row only.
+      const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      let id = null;
+      if (UUID_RE.test(rawUuid)) {
+        const hit = findByUuid.get(rawUuid);
+        if (hit && !claimed.has(hit.id)) id = hit.id;
+      }
+      if (!id && /^\d+$/.test(String(rawId ?? '').trim())) {
+        const hit = findSql.get(Number(rawId));
+        if (hit && !claimed.has(hit.id) && same(hit.brand, y.brand) && same(hit.model, y.model)) id = hit.id;
+      }
       if (!id) {
         const open = matchByIdentity.all({ brand: y.brand, model: y.model, color: y.color })
           .filter((m) => !claimed.has(m.id));
@@ -1788,14 +1839,18 @@ app.post('/api/import', uploadCsv.single('file'), (req, res) => {
           if (hasCustomCols) {
             let existing = {};
             try { existing = JSON.parse(getCustomSql.get(id).custom || '{}'); } catch { /* ignore */ }
-            params.custom = JSON.stringify({ ...existing, ...sc }); // merge, don't replace
+            const merged = { ...existing, ...sc }; // merge, don't replace
+            for (const k of clearedCustom) delete merged[k]; // an empty cell clears that field
+            params.custom = JSON.stringify(merged);
           }
           updateSql.run(params);
         }
         claimed.add(id);
         updated++;
       } else {
-        y.uuid = crypto.randomUUID();
+        // Keep the sheet's uuid when it has an unused one, so the yoyo keeps its
+        // identity across apps; otherwise mint one.
+        y.uuid = UUID_RE.test(rawUuid) && !uuidTaken.get(rawUuid) ? rawUuid : crypto.randomUUID();
         y.rev = nextRev();
         claimed.add(Number(insertSql.run(y).lastInsertRowid));
         created++;
@@ -1884,6 +1939,7 @@ app.post('/api/restore', uploadZip.single('file'), async (req, res) => {
 const RESTORE_CHUNK_MAX = 16 * 1024 * 1024;
 const RESTORE_TOTAL_MAX = Number(process.env.RESTORE_MAX_MB || 8192) * 1024 * 1024;
 const UPLOAD_ID_RE = /^[0-9a-f-]{36}$/;
+const RESTORE_OPEN_MAX = 3;
 const chunkPath = (id) => path.join(SCRATCH_DIR, `chunked-${id}.zip`);
 
 app.post('/api/restore/uploads', (req, res) => {
@@ -1893,10 +1949,16 @@ app.post('/api/restore/uploads', (req, res) => {
     return res.status(400).json({ error: `Backup is larger than this server allows (${Math.round(RESTORE_TOTAL_MAX / 1048576)}MB; see RESTORE_MAX_MB).` });
   }
   // An upload abandoned mid-way (tab closed) would otherwise sit in scratch
-  // until the next restart; clear any older than a day.
+  // until the next restart; clear any untouched for six hours.
   for (const f of fs.readdirSync(SCRATCH_DIR)) {
     const fp = path.join(SCRATCH_DIR, f);
-    if (f.startsWith('chunked-') && Date.now() - fs.statSync(fp).mtimeMs > 86_400_000) fs.rmSync(fp, { force: true });
+    if (f.startsWith('chunked-') && Date.now() - fs.statSync(fp).mtimeMs > 6 * 3_600_000) fs.rmSync(fp, { force: true });
+  }
+  // Only a few uploads may be open at once, so a client can't fill the disk
+  // with half-finished ones.
+  const open = fs.readdirSync(SCRATCH_DIR).filter((f) => f.startsWith('chunked-')).length;
+  if (open >= RESTORE_OPEN_MAX) {
+    return res.status(429).json({ error: 'Another restore is already uploading. Wait for it to finish, or try again later.' });
   }
   const id = crypto.randomUUID();
   fs.writeFileSync(chunkPath(id), '');
