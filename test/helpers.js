@@ -21,10 +21,14 @@ export async function startServer(env = {}) {
   let log = '';
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
+  let exited = false;
+  child.once('exit', () => { exited = true; });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {
     try { await fetch(base + '/api/config'); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
-    if (i === 99) throw new Error('server did not start:\n' + log);
+    // A server that crashed on boot won't come up; say so now, not in 10s.
+    if (exited) throw new Error('server exited during startup:\n' + log);
+    if (i === 99) { child.kill(); throw new Error('server did not start:\n' + log); }
   }
   return {
     base, dir,

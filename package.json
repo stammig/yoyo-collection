@@ -32,7 +32,7 @@
     "node": ">=22.13 <23 || >=23.4"
   },
   "dependencies": {
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "csv-parse": "^7.0.3",
     "csv-stringify": "^6.5.2",
     "express": "^5.2.1",

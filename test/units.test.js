@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWriteStream } from 'node:fs';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { normalizeDay } from '../dates.js';
 import { listEntries, extractEntry } from '../unzip.js';
 
@@ -23,7 +23,7 @@ test('unzip.js round-trips stored and deflated entries', async () => {
   const big = Buffer.alloc(300_000, 7);
   await new Promise((resolve, reject) => {
     const out = createWriteStream(zipPath); out.on('close', resolve);
-    const a = archiver('zip'); a.on('error', reject); a.pipe(out);
+    const a = new ZipArchive(); a.on('error', reject); a.pipe(out);
     a.append('hello', { name: 'yoyos.db', store: true });
     a.append(big, { name: 'uploads/a.jpg' });
     a.finalize();
