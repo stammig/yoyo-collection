@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { stringify } from 'csv-stringify/sync';
 import { parse } from 'csv-parse/sync';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { track as trackPackage, configuredCarriers } from './carriers.js';
 import { DAY_FIELDS, normalizeDay, localDayStamp } from './dates.js';
 import { canonicalCondition, canonicalComposition } from './vocab.js';
@@ -1690,7 +1690,7 @@ app.get('/api/backup.zip', (req, res) => {
   // JPEGs, so deflating them wastes CPU/time for ~no size gain — and that slow
   // compression burst is what makes shared hosts (LiteSpeed/CloudLinux) kill the
   // request with a 503. Storing makes bytes flow almost immediately.
-  const archive = archiver('zip', { store: true });
+  const archive = new ZipArchive({ store: true });
   archive.on('error', (err) => {
     console.error('backup archive error:', err);
     if (!res.headersSent) res.status(500).json({ error: 'Backup failed.' });
