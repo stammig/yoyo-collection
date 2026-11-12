@@ -3358,8 +3358,12 @@ async function renderCardBlob(y) {
 
   // Visible fields = the collection's current selection, filtered by the same
   // public-sensitivity rule the rest of the UI uses.
+  // Price paid (and the % off worked out from it) is left off a card unless the
+  // owner has chosen to include it: a card is made to be posted publicly.
+  const withPaid = isOwnerState && shareCardIncludesPaid();
   const visible = (Array.isArray(view?.fields) ? view.fields : [])
-    .filter((k) => isOwnerState || !SENSITIVE.has(k));
+    .filter((k) => isOwnerState || !SENSITIVE.has(k))
+    .filter((k) => withPaid || (k !== 'paid' && k !== 'percent_off'));
   const seen = (k) => visible.includes(k);
   const has = (k) => { const v = valueOf(y, k); return v != null && v !== ''; };
 
@@ -3583,6 +3587,19 @@ async function renderCardBlob(y) {
 
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas export failed'))), 'image/png'));
+}
+
+// The owner's choice to show price paid on share cards. Off unless chosen, and
+// remembered on this device.
+function shareCardIncludesPaid() {
+  try { return localStorage.getItem('shareCardPaid') === '1'; } catch { return false; }
+}
+const sharePaidBox = $('#sharePaidToggle');
+if (sharePaidBox) {
+  sharePaidBox.checked = shareCardIncludesPaid();
+  sharePaidBox.addEventListener('change', () => {
+    try { localStorage.setItem('shareCardPaid', sharePaidBox.checked ? '1' : '0'); } catch { /* ignore */ }
+  });
 }
 
 // Renders and triggers a browser download of one yoyo's share card PNG.
@@ -4611,6 +4628,8 @@ async function loadConfig() {
   // there would be no way back.
   const ro = $('#readOnlyAdmin');
   if (ro) ro.classList.toggle('hidden', !isOwnerState);
+  const sess = $('#sessionsAdmin');
+  if (sess) sess.classList.toggle('hidden', !c.loggedIn);
   const roBox = $('#readOnlyToggle');
   if (roBox) roBox.checked = readOnlyState;
   updateToolbar();
@@ -4655,6 +4674,21 @@ $('#loginForm').addEventListener('submit', async (e) => {
     $('#loginError').textContent = err.message || 'Incorrect password.';
     $('#loginError').classList.remove('hidden');
   }
+});
+
+$('#logoutAllBtn')?.addEventListener('click', async () => {
+  if (!confirm('Sign out every browser and app? They will all need the password again.')) return;
+  const status = $('#logoutAllStatus');
+  try {
+    await api('/api/logout-all', { method: 'POST' });
+  } catch (err) {
+    if (status) status.textContent = err.message || 'Could not sign out everywhere.';
+    return;
+  }
+  try { localStorage.removeItem('yoyoToken'); } catch { /* ignore */ }
+  closeModal(); closeDetail();
+  await loadConfig();
+  await loadAll();
 });
 
 $('#logoutBtn').addEventListener('click', async () => {

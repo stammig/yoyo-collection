@@ -28,7 +28,10 @@ export function normalizeDay(s) {
   let m;
   if ((m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return isoDay(+m[1], +m[2], +m[3]) || t;
   if ((m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/))) {
-    let yr = +m[3]; if (m[3].length === 2) yr += 2000;
+    let yr = +m[3];
+    // Two-digit years: 20xx unless that is more than a year ahead, then 19xx
+    // (so "6/1/98" is 1998, and next year's release date still reads as 20xx).
+    if (m[3].length === 2) yr += (2000 + yr > new Date().getFullYear() + 1) ? 1900 : 2000;
     const [a, b] = [+m[1], +m[2]];
     return (a > 12 ? isoDay(yr, b, a) : isoDay(yr, a, b)) || t;
   }

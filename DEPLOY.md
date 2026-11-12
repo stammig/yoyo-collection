@@ -172,7 +172,11 @@ Set these as environment variables on your host (Render: **Environment** tab):
   change. Best for a public showcase.
 - `FRAME_ANCESTORS=https://yoursite.com` — only *your* site is allowed to embed
   the app, so others can't iframe it elsewhere. Use your real domain, including
-  `https://`.
+  `https://`. Visitors can browse the embedded copy; to sign in and edit, use
+  the app's own address.
+- `TRUST_PROXY=1` — the host runs the app behind its own proxy, so this lets the
+  wrong-password limit tell visitors apart. Without it, everyone shares the
+  proxy's address and one person's wrong guesses pause sign-in for all.
 
 After changing env vars, the host redeploys automatically (~1 minute).
 

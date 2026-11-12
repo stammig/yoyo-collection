@@ -463,6 +463,7 @@
         <button type="button" id="detailDelete" class="btn btn-danger">Delete</button>
         <span class="spacer"></span>
         <button type="button" id="detailCopyLink" class="btn btn-ghost" title="Copy a shareable link to this yoyo">🔗 Copy link</button>
+        <label class="owner-only hint share-paid" title="Show what you paid on the share card"><input type="checkbox" id="sharePaidToggle" /> Price paid</label>
         <button type="button" id="detailShare" class="btn btn-ghost" title="Download a shareable card image">⤓ Share card</button>
       </div>
     </div>
@@ -495,6 +496,17 @@
           <div class="settings-toolbar">
             <label class="switch"><input type="checkbox" id="readOnlyToggle" /><span class="track"></span><span class="switch-label">Read-only mode</span></label>
             <span id="readOnlyStatus" class="hint"></span>
+          </div>
+        </section>
+
+        <section class="form-section hidden" id="sessionsAdmin">
+          <header class="fs-head"><span class="fs-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg></span>
+            <div><h3>Signed-in devices</h3><p>Sign out every browser and app</p></div>
+          </header>
+          <p class="hint">Use this if a device was lost or someone else may have signed in. Every browser, and the iPhone, Mac and Android apps, will need the password again before they can publish or edit. This device is signed out too.</p>
+          <div class="settings-toolbar">
+            <button type="button" class="btn btn-ghost" id="logoutAllBtn">Sign out everywhere</button>
+            <span id="logoutAllStatus" class="hint"></span>
           </div>
         </section>
 
