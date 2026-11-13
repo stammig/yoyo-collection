@@ -1508,7 +1508,9 @@ async function bulkDelete() {
 // Opens the "Edit N yoyos" dialog (BULK_FIELDS only) — every control defaults
 // to "No change" so the apply step only touches fields the user actually set.
 function openBulkEdit() {
-  if (!selectedIds.size) return;
+  // Count what the edit will actually touch: selected AND still shown.
+  const shownCount = selectedShownIds().length;
+  if (!shownCount) return;
   if (demoGuard()) return;
   const rows = BULK_FIELDS.map((f) => {
     let control;
@@ -1525,7 +1527,7 @@ function openBulkEdit() {
   const card = document.createElement('div');
   card.className = 'modal-card modal-sm';
   card.innerHTML =
-    `<div class="modal-head"><h2>Edit ${selectedIds.size} yoyo${selectedIds.size === 1 ? '' : 's'}</h2></div>` +
+    `<div class="modal-head"><h2>Edit ${shownCount} yoyo${shownCount === 1 ? '' : 's'}</h2></div>` +
     `<div class="form"><div class="form-section"><div class="be-grid">${rows}</div>` +
     `<p class="hint">Only fields you change are applied; the rest are left as-is.</p></div></div>` +
     `<div class="modal-foot"><span class="spacer"></span><button class="btn btn-ghost" data-act="cancel">Cancel</button><button class="btn btn-primary" data-act="apply">Apply</button></div>`;

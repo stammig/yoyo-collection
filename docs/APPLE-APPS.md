@@ -53,9 +53,10 @@ working:
 
 The web CSV export now has a `uuid` column, which `CSVImporter.swift` already
 matches on. Cells that a spreadsheet would run as a formula (starting with `=`,
-`@`, or `+`/`-` followed by something other than a number) get a leading `'`.
-The web importer removes it again. The Apple importer keeps values as written,
-so those rare cells would keep the `'` until the app removes it too.
+`@`, `+`, `-`, tab or CR) get a leading `'`, unless the whole cell is a plain
+number such as `-5`. The web importer removes the `'` again. The Apple importer
+keeps values as written, so those cells (for example a note starting "- ")
+keep the `'` until the app removes it too.
 
 ## Ideas for the next Apple app update
 

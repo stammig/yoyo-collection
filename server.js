@@ -80,6 +80,13 @@ fs.mkdirSync(SCRATCH_DIR, { recursive: true });
 for (const stale of fs.readdirSync(SCRATCH_DIR)) {
   fs.rmSync(path.join(SCRATCH_DIR, stale), { force: true, recursive: true });
 }
+// ...and restore's photo staging folders (uploads/.restore-*), which only a
+// run that died mid-restore leaves behind.
+if (fs.existsSync(UPLOAD_DIR)) {
+  for (const stale of fs.readdirSync(UPLOAD_DIR)) {
+    if (stale.startsWith('.restore-')) fs.rmSync(path.join(UPLOAD_DIR, stale), { force: true, recursive: true });
+  }
+}
 
 const app = express();
 
@@ -169,9 +176,15 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 // everywhere" bumps the epoch, so every earlier token stops working at once
 // (the web, the Apple apps and Android all sign in again). Changing
 // ADMIN_PASSWORD already does the same, because the signing key derives from it.
+// Read once and kept in memory: every request checks it, often several times.
+// Only /api/logout-all changes it, and that updates this copy too.
+let cachedEpoch = null;
 function sessionEpoch() {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'session_epoch'").get();
-  return row ? Number(row.value) || 0 : 0;
+  if (cachedEpoch === null) {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'session_epoch'").get();
+    cachedEpoch = row ? Number(row.value) || 0 : 0;
+  }
+  return cachedEpoch;
 }
 function makeToken() {
   const payload = Buffer.from(JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE * 1000, ep: sessionEpoch() })).toString('base64url');
@@ -288,8 +301,12 @@ const CSP = [
 ].join('; ');
 
 function isCrossSite(req) {
+  // Every current browser sends Sec-Fetch-Site, and the browser itself sets it,
+  // so it decides when present. Origin vs Host is only the fallback for older
+  // browsers: a proxy that rewrites Host would make it misfire on same-origin
+  // requests.
   const site = req.headers['sec-fetch-site'];
-  if (site === 'cross-site' || site === 'same-site') return true;
+  if (site) return site !== 'same-origin' && site !== 'none';
   const origin = req.headers.origin;
   if (!origin || origin === 'null') return origin === 'null';
   let host;
@@ -339,8 +356,13 @@ app.post('/api/login', (req, res) => {
   if (!LOGIN_ENABLED) return res.status(400).json({ error: 'Login is not enabled on this server.' });
   const ipBucket = failBucket('ip:' + clientIp(req));
   const allBucket = failBucket('all');
-  if (ipBucket.count >= LOGIN_FAIL_MAX || allBucket.count >= LOGIN_FAIL_GLOBAL_MAX) {
-    const until = Math.max(ipBucket.count >= LOGIN_FAIL_MAX ? ipBucket.resetAt : 0, allBucket.count >= LOGIN_FAIL_GLOBAL_MAX ? allBucket.resetAt : 0);
+  // The site-wide ceiling only pauses addresses that have themselves guessed
+  // wrong recently. Otherwise someone spreading guesses over many addresses
+  // could lock out the owner (and the apps' Publish), who hasn't failed at all.
+  const ipBlocked = ipBucket.count >= LOGIN_FAIL_MAX;
+  const siteBlocked = allBucket.count >= LOGIN_FAIL_GLOBAL_MAX && ipBucket.count > 0;
+  if (ipBlocked || siteBlocked) {
+    const until = Math.max(ipBlocked ? ipBucket.resetAt : 0, siteBlocked ? allBucket.resetAt : 0);
     res.setHeader('Retry-After', Math.ceil((until - Date.now()) / 1000));
     return res.status(429).json({ error: 'Too many wrong passwords. Try again in a few minutes.' });
   }
@@ -422,6 +444,11 @@ app.use((req, res, next) => {
 });
 
 // ---- File uploads (photos) ----
+// Every image extension a stored photo may have. New uploads are always
+// jpg/png/webp/gif, but earlier versions kept the uploaded file's own extension
+// (.jpe, .jfif, .heic…), and those photos must stay visible, served and backed
+// up. SVG is deliberately absent: it can carry script.
+const IMAGE_EXTS = 'jpe?g|jpe|jfif|pjpeg|png|webp|gif|heic|heif|avif|bmp|tiff?';
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 // Stored filenames get their extension from this fixed table, keyed by the
 // already-validated mimetype — NOT from the client-supplied original filename.
@@ -474,7 +501,7 @@ const uploadZip = multer({
 // act as a page on this site. HEAD /uploads/<name> answering 200/404 is part of
 // the Apple apps' publish (it asks "is this photo already there?"), so this
 // stays public and keeps that behaviour.
-const SERVABLE_UPLOAD = /\.(?:jpe?g|png|webp|gif)$/i;
+const SERVABLE_UPLOAD = new RegExp(`\\.(?:${IMAGE_EXTS})$`, 'i');
 app.use('/uploads', (req, res, next) => {
   if (!SERVABLE_UPLOAD.test(req.path)) return res.status(404).end();
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
@@ -611,7 +638,7 @@ function uploadPath(name) {
 // starting with a letter or digit, and an image extension. Covers every name
 // the app has ever written — "<timestamp>-<hex>.jpg" from the web, and
 // "<UUID>.jpg" (upper- or lower-case) from the Apple and Android apps.
-const SAFE_PHOTO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.(?:jpe?g|png|webp|gif)$/i;
+const SAFE_PHOTO_NAME = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\\.(?:${IMAGE_EXTS})$`, 'i');
 const isSafePhotoName = (name) => typeof name === 'string' && SAFE_PHOTO_NAME.test(name) && !name.includes('..');
 async function makeThumb(filename) {
   if (!sharp) return; // image processing unavailable — frontend falls back to full image
@@ -1018,6 +1045,17 @@ app.put('/api/yoyos/:id', (req, res) => {
     ? (wasListed ? existing.sale_listed_at : nowSql())
     : (status === '' ? null : existing.sale_listed_at);
   assign.push('sale_listed_at = @sale_listed_at');
+
+  // Nothing actually different? Then nothing changes: bumping updated_at here
+  // would make this copy "newer" and beat a real edit a device syncs next.
+  const same = (a, b) => (a ?? null) === (b ?? null) || (a != null && b != null && String(a) === String(b));
+  const customSame = () => {
+    try { return JSON.stringify(JSON.parse(existing.custom || '{}')) === params.custom; } catch { return false; }
+  };
+  const changed = present.some((c) => !same(params[c], existing[c]))
+    || (params.custom !== undefined && !customSame())
+    || !same(params.sale_listed_at, existing.sale_listed_at);
+  if (!changed) return res.json(decorate(existing));
 
   db.transaction(() => {
     params.rev = nextRev();
@@ -1530,8 +1568,10 @@ app.get('/api/settings', (_req, res) => {
 // the Apple apps and Android all have to sign in again. Owner only (write gate).
 app.post('/api/logout-all', (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ error: 'Log in first.' });
+  const next = sessionEpoch() + 1;
   db.prepare("INSERT INTO settings (key, value) VALUES ('session_epoch', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-    .run(String(sessionEpoch() + 1));
+    .run(String(next));
+  cachedEpoch = next;
   res.setHeader('Set-Cookie', ['yoyo_session=', ...sessionCookieAttrs(req, 0)].join('; '));
   res.json({ ok: true });
 });
@@ -1730,13 +1770,16 @@ function exportValue(header, y, base) {
 }
 
 // A cell a spreadsheet would run as a formula gets a leading ' so it opens as
-// text. Plain numbers ("-5", "+1") and ordinary text ("- small ding") are left
-// alone, so the file stays readable by the Apple apps' importer, which keeps
-// values exactly as written. The web importer removes the ' again.
-const FORMULA_START = /^(?:[=@\t\r]|[+-](?![\d.\s]|$))/;
+// text: anything starting with = @ + - tab or CR, except a plain number
+// ("-5", "+1.5"), which is left alone. "-2+3+cmd|…" starts like a number but
+// isn't one, so it is escaped. The web importer removes the ' again; the Apple
+// apps' importer keeps values as written, so it shows the ' until it learns to
+// remove it (see docs/APPLE-APPS.md).
+const FORMULA_START = /^[=@+\-\t\r]/;
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 function escapeFormula(v) {
   const t = v == null ? '' : String(v);
-  return FORMULA_START.test(t) ? `'${t}` : t;
+  return FORMULA_START.test(t) && !PLAIN_NUMBER.test(t) ? `'${t}` : t;
 }
 const unescapeFormula = (v) => (typeof v === 'string' && /^'(?:[=@\t\r+-])/.test(v) ? v.slice(1) : v);
 

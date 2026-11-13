@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-11-13
+- **Fixes from the Phase 1 review.**
+  - CSV export now also escapes cells like `-2+3+cmd|…` that start like a
+    number but are formulas. Only a plain number such as `-5` is left as is.
+  - Photos saved by older versions with other image extensions (`.jfif`,
+    `.jpe`, `.heic` and similar) are shown, served and backed up again.
+  - The site-wide wrong-password ceiling no longer locks out an address that
+    hasn't guessed wrong, so spread-out guessing can't lock out the owner or
+    the apps' Publish.
+  - The cross-site check trusts the browser's `Sec-Fetch-Site` header first,
+    so a proxy that rewrites `Host` no longer blocks edits from the site
+    itself.
+  - Saving a yoyo with no actual changes no longer marks it as edited, so it
+    can't beat a real change synced from a phone.
+  - Restore's photo staging folders left by a crash are cleaned up at
+    startup.
+  - The bulk edit dialog counts only the selected yoyos it will change.
+  - The sign-out-everywhere counter is kept in memory instead of read from the
+    database on every request.
+
 ## 2026-11-12
 - **Sync and data integrity (1.3.0).**
   - Editing a yoyo through the API changes only the fields sent, and custom
