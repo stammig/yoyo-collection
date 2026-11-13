@@ -3,7 +3,81 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-11-13
+- **Fixes from the Phase 1 review.**
+  - CSV export now also escapes cells like `-2+3+cmd|…` that start like a
+    number but are formulas. Only a plain number such as `-5` is left as is.
+  - Photos saved by older versions with other image extensions (`.jfif`,
+    `.jpe`, `.heic` and similar) are shown, served and backed up again.
+  - The site-wide wrong-password ceiling no longer locks out an address that
+    hasn't guessed wrong, so spread-out guessing can't lock out the owner or
+    the apps' Publish.
+  - The cross-site check trusts the browser's `Sec-Fetch-Site` header first,
+    so a proxy that rewrites `Host` no longer blocks edits from the site
+    itself.
+  - Saving a yoyo with no actual changes no longer marks it as edited, so it
+    can't beat a real change synced from a phone.
+  - Restore's photo staging folders left by a crash are cleaned up at
+    startup.
+  - The bulk edit dialog counts only the selected yoyos it will change.
+  - The sign-out-everywhere counter is kept in memory instead of read from the
+    database on every request.
+
 ## 2026-11-12
+- **Sync and data integrity (1.3.0).**
+  - Editing a yoyo through the API changes only the fields sent, and custom
+    fields merge instead of being replaced. The web form sends everything, so
+    editing on the site works as before.
+  - Photos and videos are now safer during sync:
+    - A sync that sends a missing or malformed photo or video list leaves the
+      yoyo's photos alone instead of deleting them.
+    - Photo uuids match whether they arrive in upper or lower case.
+    - A sync with a broken delete date is refused instead of saved as live.
+  - Deleting a custom field, and `normalize-fields.mjs`, now mark each
+    changed yoyo so phones pick up the change.
+  - The "listed since" date is always stored as `YYYY-MM-DD HH:MM:SS`. Older
+    values are converted, so the Android app can read them.
+  - Photo files and video posters are removed only after the database change
+    has saved.
+  - "Saved vs retail" counts only yoyos with both a price paid and a retail
+    price.
+- **Maintenance scripts are safe to try.** `normalize-dates.mjs` and
+  `normalize-fields.mjs` now show what they would change unless you pass
+  `--apply`. They save a snapshot of the database beside it before writing,
+  and refuse a database the app hasn't updated yet. `normalize-fields.mjs` no
+  longer writes a `.sql` file: run it on the server with `DB_PATH` instead.
+  `seed-demo.mjs` writes only to `SEED_DB_PATH` (or `data/demo.db`) and needs
+  `FORCE=1` exactly, so it can't wipe a real collection; the demo guide's
+  commands are updated.
+- **Pages run only their own scripts.**
+  - The site sends a strict Content-Security-Policy.
+  - The inline image error handlers that a crafted file name could have used
+    are gone.
+  - The page's small start-up script moved to `boot.js`.
+- **Fixes on the site:**
+  - Pressing Enter while Cancel is focused now cancels.
+  - "Adjust price" with an empty box shows a message instead of setting
+    prices to $0.
+  - Save can't create a yoyo twice on a double click.
+  - Photos or videos that finish uploading after you've moved to another
+    yoyo no longer appear on it.
+  - Deleting from an edit sheet opened from a detail view no longer reopens
+    the deleted yoyo.
+  - Switching a sale from Trade to Cash clears the trade value.
+  - Bulk actions apply only to selected yoyos that are still shown.
+  - Bulk delete reports failures.
+  - "Not listed" is never saved as a status.
+  - The public "Copy listing" button works.
+  - Read-only mode hides editing controls in Arrivals and For Sale.
+  - Sorting by a number no longer scrambles yoyos that have no value.
+  - Overdue orders appear in an "Overdue" group in Arrivals.
+  - The "—" maker chip shows yoyos with no brand.
+  - Weights and sizes of 0 show as 0.
+  - Reordering photos saves only real changes, one at a time.
+- **SECURITY.md** explains how to report a problem and what each setup shows
+  to visitors. The server now warns at startup when it's wide open, or when
+  `READ_ONLY` is on with no password. DEPLOY.md now has you restore your
+  backup before turning on `READ_ONLY`, which blocks Restore.
 - **Behind a proxy? Set `TRUST_PROXY=1`.** Sign-in now pauses after 10 wrong
   passwords from one address in 15 minutes (`LOGIN_FAIL_MAX`); correct sign-ins
   never count. The app only believes the `X-Forwarded-For` header when

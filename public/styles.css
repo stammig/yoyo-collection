@@ -1654,3 +1654,17 @@ body:not(.owner) #settingsBtn { display: none; } /* owner-only settings; must st
 /* Share card: the "Price paid" opt-in is the owner's only. */
 .share-paid { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 body:not(.owner) .share-paid { display: none; }
+
+/* Inline error under a field in a small dialog. */
+.form-error { color: var(--danger, #b42318); font-size: 0.85rem; margin: 6px 0 0; }
+
+/* Read-only mode: the owner keeps their view, but nothing in Arrivals or
+   For Sale offers to change anything. (Query ETA and carrier links stay:
+   they only look things up.) */
+.arr-track-text { display: none; font-variant-numeric: tabular-nums; }
+body.read-only .arr-track-text { display: inline; }
+body.read-only .arr-field,
+body.read-only [data-arrived],
+body.read-only .sel-box[data-sale-sel],
+body.read-only #saleSelectionBar,
+body.read-only #saleSelectBtn { display: none !important; }

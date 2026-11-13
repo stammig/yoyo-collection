@@ -13,9 +13,11 @@ the data regularly** so it stays clean after visitors poke at it.
 1. `ADMIN_PASSWORD` is set to something you publish (e.g. `demo`).
 2. The sample data is (re)seeded on every start, so edits/vandalism reset:
    ```
-   FORCE=1 node seed-demo.mjs && npm start
+   FORCE=1 SEED_DB_PATH=data/demo.db node seed-demo.mjs && DB_PATH=data/demo.db npm start
    ```
-   `FORCE=1` lets the seed wipe and refill even a non-empty database.
+   `FORCE=1` lets the seed wipe and refill even a non-empty database. The seed
+   only writes where `SEED_DB_PATH` points (never to `DB_PATH`, which is your
+   real collection on most setups), so name the demo database on both sides.
 3. Show the password on the page (e.g. in the GitHub README:
    *"Live demo — log in with password `demo` to see the owner view"*).
 
@@ -54,7 +56,7 @@ That's it — unmetered bandwidth, rate-limited against abuse, self-resetting da
 2. Render → **New + → Web Service** → connect the repo.
 3. Settings:
    - **Build command:** `npm install`
-   - **Start command:** `FORCE=1 node seed-demo.mjs && npm start`
+   - **Start command:** `FORCE=1 SEED_DB_PATH=data/demo.db node seed-demo.mjs && DB_PATH=data/demo.db npm start`
    - **Plan:** Free is perfect here — no persistent disk means the data is
      fresh on every spin-up, which is exactly what you want for a demo.
    - **Environment:** add `ADMIN_PASSWORD = demo`
@@ -69,7 +71,7 @@ daily "reseed" cron job or scheduled restart.)
 docker build -t yoyo-demo .
 docker run -d -p 3000:3000 \
   -e ADMIN_PASSWORD=demo \
-  yoyo-demo sh -c "FORCE=1 node seed-demo.mjs && node server.js"
+  yoyo-demo sh -c "FORCE=1 SEED_DB_PATH=/tmp/demo.db node seed-demo.mjs && DB_PATH=/tmp/demo.db node server.js"
 ```
 Put it behind a reverse proxy (Caddy/Nginx) for a public HTTPS URL, and add a
 cron that restarts the container daily to reseed.

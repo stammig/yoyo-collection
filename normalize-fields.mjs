@@ -1,12 +1,12 @@
 // Merges duplicate free-text values (different spellings of the same thing)
 // so the autocomplete dropdowns for Body Material, Bearing Size, and Response
 // Type stop showing near-identical entries side by side (e.g. "6061 AL" vs
-// "6061AL" vs "6061 Aluminum"). Applies to the local DB and writes an
-// equivalent guarded SQL script (normalize-fields.sql) for the live DB.
-// Safe to re-run: each entry is an exact-match UPDATE, a no-op once applied.
+// "6061AL" vs "6061 Aluminum"). Run it on the server with DB_PATH pointing at
+// the live database. Safe to re-run: once applied, nothing matches.
 // Extend MERGES below whenever a new duplicate shows up in the field lists.
-import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openForScript, nextRev } from './sqlite.js';
 
 // [field, duplicate value as currently stored, canonical value to use instead]
 const MERGES = [
@@ -44,31 +44,37 @@ const MERGES = [
   ['composition', 'Monometal', 'MN'],
 ];
 
-const sqlEsc = (v) => `'${String(v).replace(/'/g, "''")}'`;
-
 // Honors DB_PATH so the same file works on the live server (where the DB may
-// live outside the app dir). Falls back to the local default.
-const DB_PATH = process.env.DB_PATH || 'data/yoyos.db';
-const db = new DatabaseSync(DB_PATH);
-let changed = 0;
-const sqlLines = [];
-const report = [];
+// live outside the app dir). Dry run by default; --apply snapshots the database
+// beside it, then writes. Each changed yoyo gets a new rev and updated_at so
+// synced devices pull the merged value.
+//
+//   node normalize-fields.mjs                          # show what would change
+//   DB_PATH=/path/to/yoyos.db node normalize-fields.mjs --apply
+const DB_PATH = process.env.DB_PATH || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'yoyos.db');
+const apply = process.argv.includes('--apply');
+const { db, snapshot } = openForScript(DB_PATH, { apply, label: 'normalize-fields' });
+if (snapshot) console.log(`Snapshot saved: ${snapshot}\n`);
 
+const report = [];
+const plan = []; // [id, field, to]
 for (const [field, from, to] of MERGES) {
-  sqlLines.push(`UPDATE yoyos SET ${field} = ${sqlEsc(to)} WHERE ${field} = ${sqlEsc(from)};`);
-  const res = db.prepare(`UPDATE yoyos SET ${field} = ? WHERE ${field} = ?`).run(to, from);
-  if (res.changes > 0) {
-    changed += res.changes;
-    report.push(`${field}: "${from}" -> "${to}" (${res.changes} row${res.changes > 1 ? 's' : ''})`);
+  const ids = db.prepare(`SELECT id FROM yoyos WHERE ${field} = ?`).all(from).map((r) => r.id);
+  if (ids.length) {
+    report.push(`${field}: "${from}" -> "${to}" (${ids.length} row${ids.length > 1 ? 's' : ''})`);
+    for (const id of ids) plan.push([id, field, to]);
   }
 }
 
-fs.writeFileSync('normalize-fields.sql',
-  '-- Merges duplicate free-text field values. Safe to run once on the live DB:\n' +
-  '-- each statement is an exact-match UPDATE, a no-op if already applied.\n' +
-  'BEGIN;\n' + sqlLines.join('\n') + '\nCOMMIT;\n');
-
-console.log('Local rows updated:', changed, '\n');
 console.log(report.length ? report.join('\n') : '(nothing to merge — already clean)');
-console.log('\nLive SQL written to normalize-fields.sql');
+if (plan.length && !apply) {
+  console.log('\nDry run. Re-run with --apply to write these changes.');
+} else if (plan.length) {
+  db.transaction(() => {
+    for (const [id, field, to] of plan) {
+      db.prepare(`UPDATE yoyos SET ${field} = ?, updated_at = datetime('now'), rev = ? WHERE id = ?`).run(to, nextRev(db), id);
+    }
+  })();
+  console.log(`\nUpdated ${plan.length} value${plan.length > 1 ? 's' : ''}.`);
+}
 db.close();
