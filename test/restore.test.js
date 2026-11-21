@@ -42,9 +42,7 @@ describe('restore', () => {
     ['x.html', '<!doctype html><script>alert(document.domain)</script>'],
     ['x.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
   ]) {
-    test(`a ${path.extname(name)} file in uploads/ is never served as a live page`,
-      { todo: 'Phase 1 · 1B.1 — restore extracts any file type; /uploads has no nosniff/CSP (server.js:1838, 370)' },
-      async () => {
+    test(`a ${path.extname(name)} file in uploads/ is never served as a live page`, async () => {
         assert.equal((await restore({ files: { [`uploads/${name}`]: body } })).status, 200);
         const res = await s.api('/uploads/' + name);
         if (res.status === 404) return; // not extracted at all: the preferred fix
@@ -55,9 +53,7 @@ describe('restore', () => {
       });
   }
 
-  test('a photo filename that climbs out of uploads/ cannot delete the database',
-    { todo: 'Phase 1 · 1B.2 — restored photo filenames are trusted; delete calls fs.rm on them (server.js:1876, 861)' },
-    async () => {
+  test('a photo filename that climbs out of uploads/ cannot delete the database', async () => {
       const liveDb = path.join(s.dir, 'yoyos.db');
       assert.ok(fs.existsSync(liveDb));
       await restore({ setup: photo('../yoyos.db') });
@@ -67,17 +63,13 @@ describe('restore', () => {
       assert.ok(fs.existsSync(liveDb), 'the live database file was deleted');
     });
 
-  test('a photo filename with quotes or markup is refused or renamed',
-    { todo: "Phase 1 · 1B.2 / 1E.2 — a ' in a filename escapes the inline onerror handler (app.js:764)" },
-    async () => {
+  test('a photo filename with quotes or markup is refused or renamed', async () => {
       await restore({ setup: photo("x'+alert(document.domain)+'.jpg"), files: { "uploads/x'+alert(document.domain)+'.jpg": JPEG } });
       const [y] = await (await s.api('/api/yoyos')).json();
       for (const p of y.photos) assert.match(p.url, SAFE_URL);
     });
 
-  test('a javascript: video link is dropped on restore',
-    { todo: 'Phase 1 · 1B.2 — restored video rows skip parseVideoUrl (server.js:1877)' },
-    async () => {
+  test('a javascript: video link is dropped on restore', async () => {
       await restore({
         setup: (db) => db.prepare("INSERT INTO videos (yoyo_id, uuid, provider, embed_ref, url) VALUES (1, '33333333-3333-4333-8333-333333333333', 'youtube', 'dQw4w9WgXcQ', 'javascript:alert(1)')").run(),
       });
@@ -85,9 +77,7 @@ describe('restore', () => {
       for (const v of y.videos || []) assert.ok(!/^\s*javascript:/i.test(v.url), `video url ${v.url}`);
     });
 
-  test('custom field definitions come back with the backup',
-    { todo: 'Phase 1 · 1B.3 — restore never reads field_defs or settings (server.js:1815-1820)' },
-    async () => {
+  test('custom field definitions come back with the backup', async () => {
       await restore({
         setup: (db) => {
           db.prepare("INSERT INTO field_defs (key, label, type) VALUES ('string_type', 'String type', 'text')").run();
@@ -114,9 +104,7 @@ describe('unzip.js integrity checks', () => {
     assert.equal(fs.statSync(out).size, zero.length);
   });
 
-  test('an entry that inflates past its declared size is refused (zip bomb)',
-    { todo: 'Phase 1 · 1B.7 — unzip.js never checks the extracted size (unzip.js:110)' },
-    async () => {
+  test('an entry that inflates past its declared size is refused (zip bomb)', async () => {
       const dir = tempDir();
       const zip = await makeZip(path.join(dir, 'bomb.zip'), { 'uploads/big.bin': zero }, { store: false });
       lieAboutSizes(zip, 1024);
@@ -124,9 +112,7 @@ describe('unzip.js integrity checks', () => {
       await assert.rejects(extractEntry(zip, e, path.join(dir, 'out.bin')));
     });
 
-  test('an entry whose CRC-32 does not match is refused',
-    { todo: 'Phase 1 · 1B.7 — unzip.js never verifies CRC-32 (unzip.js:110)' },
-    async () => {
+  test('an entry whose CRC-32 does not match is refused', async () => {
       const dir = tempDir();
       const zip = await makeZip(path.join(dir, 'crc.zip'), { 'uploads/a.jpg': JPEG }, { store: true });
       corruptCrcs(zip);

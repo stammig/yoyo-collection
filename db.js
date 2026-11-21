@@ -158,22 +158,6 @@ if (!photoCols.includes('uuid')) {
 }
 backfillPhotoUuids(db);
 
-// Rewrite retired vocabulary in place (NMBTS -> NMTBS, "Plastic" -> MN; see
-// vocab.js). Idempotent: once clean, the WHERE matches nothing. Each changed
-// row gets a new rev so sync clients pull the corrected value.
-{
-  const stale = db.prepare(
-    `SELECT id, condition, composition FROM yoyos
-     WHERE upper(trim(condition)) = 'NMBTS' OR lower(trim(composition)) IN ('plastic','mono-material','bi-material','tri-material','mono-metal','bi-metal','tri-metal','mn','bi','tri') AND composition NOT IN ('MN','BI','TRI')`
-  ).all();
-  if (stale.length) {
-    const fix = db.prepare('UPDATE yoyos SET condition = ?, composition = ?, rev = ? WHERE id = ?');
-    db.transaction(() => {
-      for (const r of stale) fix.run(canonicalCondition(r.condition), canonicalComposition(r.composition), nextRev(db), r.id);
-    })();
-    console.log(`vocab: normalized ${stale.length} yoyo(s) (NMBTS -> NMTBS / composition codes)`);
-  }
-}
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_uuid ON photos(uuid)');
 
 // Assign a UUID to every photo that lacks one. Exported so the restore endpoint
@@ -204,6 +188,25 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get()) {
   })();
 }
 
+// Rewrite retired vocabulary in place. This must run after the rev column and
+// the sync_rev counter exist (just above), because it stamps each fixed row
+// with nextRev(); run any earlier and an older install crashes on startup.
+// (NMBTS -> NMTBS, "Plastic" -> MN; see
+// vocab.js). Idempotent: once clean, the WHERE matches nothing. Each changed
+// row gets a new rev so sync clients pull the corrected value.
+{
+  const stale = db.prepare(
+    `SELECT id, condition, composition FROM yoyos
+     WHERE upper(trim(condition)) = 'NMBTS' OR lower(trim(composition)) IN ('plastic','mono-material','bi-material','tri-material','mono-metal','bi-metal','tri-metal','mn','bi','tri') AND composition NOT IN ('MN','BI','TRI')`
+  ).all();
+  if (stale.length) {
+    const fix = db.prepare('UPDATE yoyos SET condition = ?, composition = ?, rev = ? WHERE id = ?');
+    db.transaction(() => {
+      for (const r of stale) fix.run(canonicalCondition(r.condition), canonicalComposition(r.composition), nextRev(db), r.id);
+    })();
+    console.log(`vocab: normalized ${stale.length} yoyo(s) (NMBTS -> NMTBS / composition codes)`);
+  }
+}
 // Returns the next global revision. Call inside the surrounding write
 // transaction so the bump commits or rolls back with the row it stamps.
 export function nextRev(database = db) {

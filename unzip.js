@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 
 const EOCD_SIG = 0x06054b50;
 const ZIP64_LOCATOR_SIG = 0x07064b50;
@@ -81,7 +82,8 @@ export function listEntries(zipPath) {
         }
         x += 4 + len;
       }
-      entries.push({ name, isDirectory: name.endsWith('/'), method, compressedSize, size, headerOffset, encrypted: !!(flags & 1) });
+      const crc = cd.readUInt32LE(p + 16);
+      entries.push({ name, isDirectory: name.endsWith('/'), method, compressedSize, size, crc, headerOffset, encrypted: !!(flags & 1) });
       p = xEnd + commentLen;
     }
     return entries;
@@ -105,9 +107,35 @@ export async function extractEntry(zipPath, entry, destPath) {
   } finally {
     fs.closeSync(fd);
   }
+  // Every entry is checked as it is written: it may not grow past the size the
+  // archive declares (a zip bomb lies about that), and its CRC-32 must match.
+  // On any mismatch the partial file is removed and the restore is refused.
+  let written = 0;
+  let crc = 0;
+  const check = new Transform({
+    transform(chunk, _enc, cb) {
+      written += chunk.length;
+      if (written > entry.size) return cb(new Error(`${entry.name} is larger than the archive says`));
+      crc = zlib.crc32(chunk, crc);
+      cb(null, chunk);
+    },
+    flush(cb) {
+      if (written !== entry.size) return cb(new Error(`${entry.name} is shorter than the archive says`));
+      if (entry.crc !== undefined && (crc >>> 0) !== (entry.crc >>> 0)) return cb(new Error(`${entry.name} is damaged (checksum mismatch)`));
+      cb();
+    },
+  });
   const out = fs.createWriteStream(destPath);
-  if (entry.compressedSize === 0) { out.end(); await new Promise((r, j) => out.on('finish', r).on('error', j)); return; }
-  const src = fs.createReadStream(zipPath, { start: dataStart, end: dataStart + entry.compressedSize - 1 });
-  if (entry.method === 0) await pipeline(src, out);
-  else await pipeline(src, zlib.createInflateRaw(), out);
+  try {
+    if (entry.compressedSize === 0) {
+      await pipeline(async function* () {}, check, out);
+    } else {
+      const src = fs.createReadStream(zipPath, { start: dataStart, end: dataStart + entry.compressedSize - 1 });
+      if (entry.method === 0) await pipeline(src, check, out);
+      else await pipeline(src, zlib.createInflateRaw(), check, out);
+    }
+  } catch (err) {
+    fs.rmSync(destPath, { force: true });
+    throw err;
+  }
 }

@@ -111,12 +111,15 @@ the app runs fully open on port 3000. Copy [`.env.example`](.env.example) to
 | `DB_PATH` / `UPLOAD_DIR` | Where the database and photos live |
 | `RESTORE_TMP_DIR` | Where Restore puts its scratch folder (defaults to alongside `DB_PATH`) |
 | `RESTORE_MAX_MB` | Largest backup Restore accepts (default 8192 MB) |
+| `RESTORE_EXTRACT_MAX_MB` | Largest total a backup may unpack to (default 16384 MB) |
 | `ADMIN_PASSWORD` | Public read-only + owner login to edit |
 | `READ_ONLY` | Make the whole app read-only |
 | `AUTH_USER` / `AUTH_PASS` | HTTP Basic auth over the entire app (fully private) |
 | `DEMO_MODE` | Public demo: login works but all writes are blocked, and pages are `noindex` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | Throttle requests per IP (off by default; recommended for public instances) |
-| `FRAME_ANCESTORS` | Allow embedding the app in an `<iframe>` on your own site |
+| `FRAME_ANCESTORS` | Allow embedding the app in an `<iframe>` on your own site (visitors can browse it there; sign in on the app's own address) |
+| `TRUST_PROXY` | Set to `1` behind a proxy you run (Passenger, nginx, Caddy, Cloudflare) so limits see each visitor's real address |
+| `LOGIN_FAIL_MAX` | Wrong passwords per address per 15 minutes before sign-in pauses (default 10) |
 | `SESSION_SECRET` | Override the auto-derived owner-login signing key |
 | `TZ` | Your time zone (e.g. `America/New_York`). Only affects the dates in backup and CSV export filenames, which otherwise follow the server's clock (UTC in Docker) |
 | `UPS_*` / `USPS_*` / `FEDEX_*` | Enable carrier ETA look-ups |

@@ -44,7 +44,7 @@ test('a pre-sync database with clean vocabulary boots', async () => {
 });
 
 test('a pre-sync database with old vocabulary boots and is normalized',
-  { todo: 'Phase 1 · 1D.1 — vocab cleanup runs before the rev/sync_rev migration (db.js:161-176)' },
+  {},
   async () => {
     const dir = tempDir();
     const file = makePreSyncDb(path.join(dir, 'yoyos.db'), OLD_VOCAB);
@@ -58,7 +58,7 @@ test('a pre-sync database with old vocabulary boots and is normalized',
   });
 
 test('a current-schema database with old vocabulary but no sync_rev boots',
-  { todo: 'Phase 1 · 1D.1 — nextRev() throws before the sync_rev row exists (db.js:211)' },
+  {},
   async () => {
     const dir = tempDir();
     const file = makeDb(path.join(dir, 'yoyos.db'), OLD_VOCAB);

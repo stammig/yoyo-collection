@@ -17,6 +17,14 @@ test('normalizeDay', () => {
   for (const [input, want] of Object.entries(cases)) assert.equal(normalizeDay(input), want, input);
 });
 
+test('normalizeDay: two-digit years more than a year ahead are 19xx', () => {
+  const next = (new Date().getFullYear() + 1) % 100;
+  const far = (next + 5) % 100;
+  assert.equal(normalizeDay(`1/2/${String(next).padStart(2, '0')}`).slice(0, 4), String(2000 + next));
+  if (far > next) assert.equal(normalizeDay(`1/2/${String(far).padStart(2, '0')}`).slice(0, 4), String(1900 + far));
+  assert.equal(normalizeDay('6/1/98'), '1998-06-01');
+});
+
 test('unzip.js round-trips stored and deflated entries', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yoyo-zip-'));
   const zipPath = path.join(dir, 't.zip');

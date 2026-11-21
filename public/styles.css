@@ -1650,3 +1650,7 @@ body:not(.owner) #settingsBtn { display: none; } /* owner-only settings; must st
 .sale-actions { display: flex; gap: 8px; margin-top: 12px; }
 .sale-actions .btn { flex: 1 1 auto; white-space: nowrap; }
 .btn-sm { padding: 6px 12px; font-size: 13.5px; }
+
+/* Share card: the "Price paid" opt-in is the owner's only. */
+.share-paid { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+body:not(.owner) .share-paid { display: none; }

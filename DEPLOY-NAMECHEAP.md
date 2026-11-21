@@ -43,6 +43,10 @@ In the Node app panel, add (use your real values / `USER`):
 - `ADMIN_PASSWORD` = your owner password
 - `DB_PATH` = `/home/USER/yoyo-data/yoyos.db`
 - `UPLOAD_DIR` = `/home/USER/yoyo-data/uploads`
+- `TRUST_PROXY` = `1` — Passenger sits in front of the app, so without this
+  every visitor looks like the same address, and a few wrong passwords from
+  anyone would pause sign-in (including "Publish to website" from the apps) for
+  15 minutes.
 
 Optional — **carrier tracking** (the "Query ETA" button on Arrivals). Add only
 the carriers you want; each needs a production OAuth client (not sandbox). The

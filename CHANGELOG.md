@@ -4,6 +4,60 @@ All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
 ## 2026-11-12
+- **Behind a proxy? Set `TRUST_PROXY=1`.** Sign-in now pauses after 10 wrong
+  passwords from one address in 15 minutes (`LOGIN_FAIL_MAX`); correct sign-ins
+  never count. The app only believes the `X-Forwarded-For` header when
+  `TRUST_PROXY` is set. Without it on a proxied host (Namecheap/Passenger,
+  nginx, Caddy, Cloudflare), every visitor shares one address.
+- **Visitors see less.** The public view now gets a fixed list of fields:
+  - Sold yoyos are hidden entirely, including from link previews and the
+    Insights count.
+  - Custom fields, timestamps and sync data are never sent.
+  - The asking price shows only while a yoyo is listed.
+- **Backups are owner-only everywhere.** A public `READ_ONLY` site with no
+  password used to let anyone download the database. Backups are now a
+  consistent snapshot of the database, and they hold only image files.
+- **Other websites can't make changes as you.** A change that comes from another
+  site's page is refused unless it carries the apps' sign-in token. The sign-in
+  cookie is always `SameSite=Lax`. Every response now sends `nosniff`, a referrer
+  policy, and same-origin-only framing unless `FRAME_ANCESTORS` says otherwise.
+- **Sign out everywhere.** A new button in Settings signs out every browser and
+  app at once. A garbled cookie now just means "signed out" instead of an
+  error.
+- **Restore checks everything in a backup.**
+  - Only image files with plain names are unpacked.
+  - Photo names that could reach outside the photos folder, or carry markup,
+    are dropped.
+  - Video links are checked as if they had been pasted.
+  - Each file's size and checksum must match.
+  - The number of files and the total unpacked size are capped
+    (`RESTORE_EXTRACT_MAX_MB`).
+  - Photos are moved in only after the database is replaced, and existing
+    photos are never deleted.
+  - Custom field definitions and sale notes come back with a web backup.
+  - Yoyos a restore removes are kept as deleted records, so phones learn
+    they're gone.
+- **Uploads are served as images only,** with a policy that stops anything in
+  them from running.
+- **Older installs start again.** Upgrading a database from before sync support
+  no longer crashes on startup.
+- **CSV:**
+  - The export has a `uuid` column, and imports match on it first.
+  - A numeric `id` is used only when the brand and model agree, and no two rows
+    can update the same yoyo.
+  - "No", "0" and "false" import as no.
+  - A cell with two numbers in it is left empty instead of guessed.
+  - Two-digit years more than a year ahead read as 19xx.
+  - An empty custom-field cell clears that field.
+  - Cells a spreadsheet would run as formulas are exported with a leading `'`,
+    which import removes.
+- **Share cards leave out price paid** unless you tick "Price paid" next to the
+  Share card button (remembered on that device).
+- **Share pages work for any name,** including names with `$'` or `$&`.
+- **The Apple apps keep publishing.** A new test replays the iPhone, iPad and
+  Mac app's "Publish to website" exactly as the app sends it. See
+  [docs/APPLE-APPS.md](docs/APPLE-APPS.md) for what the server must keep doing
+  for them.
 - **Docker images are published only after the tests pass.** The publish
   workflow now runs the full test suite on the same commit first, for pushes to
   main and for version tags, so a failing change can't reach `:latest`.
