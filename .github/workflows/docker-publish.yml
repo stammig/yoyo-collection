@@ -1,7 +1,8 @@
 # Build the app image and publish it to the GitHub Container Registry (GHCR),
 # so anyone can run Yoyo Collection without cloning or building — see install.sh
 # and the README. Runs on every push to main (tags the image :latest) and on
-# every version tag like v1.2.3 (tags :1.2.3, :1.2 and :latest).
+# every version tag like v1.2.3 (tags :1.2.3, :1.2 and :latest), and only after
+# the test suite passes on that commit.
 #
 # The image is multi-arch (amd64 + arm64) so it runs on Intel/AMD servers,
 # Apple Silicon, and Raspberry Pi alike. No secrets to configure: the built-in
@@ -24,7 +25,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The image is only built after the full test suite passes on this exact
+  # commit (tags included), so a failing change never reaches :latest.
+  test:
+    uses: ./.github/workflows/test.yml
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

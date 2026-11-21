@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. Every commit that
 changes app behavior gets an entry — newest first.
 
+## 2026-11-12
+- **Docker images are published only after the tests pass.** The publish
+  workflow now runs the full test suite on the same commit first, for pushes to
+  main and for version tags, so a failing change can't reach `:latest`.
+- **Dependency updates.** express's body-parser is now 2.4.0, which fixes a
+  denial of service through compressed request bodies. archiver is now 8.0.0, and
+  backups keep the same layout (checked by a new round-trip test). Dependabot now opens weekly update
+  PRs for npm packages and GitHub Actions.
+- **More tests.** New tests cover upgrading older databases, who may back up,
+  export, import and restore in each access mode, cross-site requests, a full
+  backup-and-restore round trip with photos, and restoring untrusted backup
+  files. Tests for known problems that aren't fixed yet are marked `todo`: they
+  run and report, but don't fail the suite.
+
 ## 2026-10-22
 - **New colorway.** Use the button in a yoyo's detail sheet, or "New
   colorway…" in its right-click menu, to open the Add form pre-filled from

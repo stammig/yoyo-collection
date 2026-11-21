@@ -1,0 +1,21 @@
+# Weekly update PRs for npm packages and for the GitHub Actions the workflows
+# use. Minor and patch npm updates are grouped into one PR to keep the noise
+# down; major versions still arrive one at a time so each can be checked.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
