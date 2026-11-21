@@ -7,28 +7,38 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-let nextPort = 3400 + Math.floor(Math.random() * 400);
 
+// Each server gets a port the system picks (PORT=0) and reports in its
+// "running at" line. Choosing ports here could collide with another process on
+// a shared CI machine: the server would start, but requests would never reach it.
 export async function startServer(env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yoyo-test-'));
-  const port = nextPort++;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DB_PATH: path.join(dir, 'yoyos.db'), UPLOAD_DIR: path.join(dir, 'uploads'),
+    env: { ...process.env, PORT: '0', DB_PATH: path.join(dir, 'yoyos.db'), UPLOAD_DIR: path.join(dir, 'uploads'),
       ADMIN_PASSWORD: '', READ_ONLY: '', DEMO_MODE: '', RATE_LIMIT_MAX: '', AUTH_USER: '', AUTH_PASS: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
-  child.stdout.on('data', (d) => { log += d; });
+  let port = null;
+  child.stdout.on('data', (d) => {
+    log += d;
+    const m = log.match(/running at http:\/\/localhost:(\d+)/);
+    if (m) port = Number(m[1]);
+  });
   child.stderr.on('data', (d) => { log += d; });
   let exited = false;
   child.once('exit', () => { exited = true; });
-  const base = `http://127.0.0.1:${port}`;
+  let base = null;
   for (let i = 0; i < 300; i++) { // up to 30s: the suite boots many servers at once
-    try { await fetch(base + '/api/config'); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    if (port) {
+      base = `http://127.0.0.1:${port}`;
+      try { await fetch(base + '/api/config'); break; } catch { base = null; }
+    }
     // A server that crashed on boot won't come up; say so now, not after the full wait.
     if (exited) throw new Error('server exited during startup:\n' + log);
     if (i === 299) { child.kill(); throw new Error('server did not start:\n' + log); }
+    await new Promise((r) => setTimeout(r, 100));
   }
   return {
     base, dir,
