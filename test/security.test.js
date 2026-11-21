@@ -23,6 +23,18 @@ describe('headers (1A.3)', () => {
     assert.equal(r.headers.get('referrer-policy'), 'same-origin');
     assert.match(r.headers.get('content-security-policy') || '', /frame-ancestors 'self'/);
   });
+  test('pages may run only their own scripts', async () => {
+    const csp = (await s.api('/')).headers.get('content-security-policy') || '';
+    assert.match(csp, /script-src 'self'(;|$)/);
+    assert.doesNotMatch(csp, /unsafe-eval|script-src[^;]*unsafe-inline/);
+    const html = await (await s.api('/')).text();
+    assert.doesNotMatch(html, /<script>(?!<\/script>)/, 'no inline <script> in the page');
+    assert.doesNotMatch(html, /\son[a-z]+="/, 'no inline event handlers in the page');
+  });
+  test('app.js has no inline event handlers left', async () => {
+    const js = await (await s.api('/app.js')).text();
+    assert.doesNotMatch(js, /\son(error|click|load)="/);
+  });
   test('the login cookie is SameSite=Lax', async () => {
     const t = await startServer({ ADMIN_PASSWORD: PW });
     try {

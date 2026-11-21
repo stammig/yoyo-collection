@@ -38,13 +38,25 @@ Built by `BackupExporter.swift` (`APPLE_SCHEMA` in `test/fixtures.js` copies it)
 - Zips are stored (not compressed), with correct CRC-32s and no Zip64. Restore
   now checks each entry's size and CRC-32.
 
+## Sync changes in 1.3.0
+
+The Apple apps don't call `/api/sync/push` or `/api/sync/changes`; those are
+Android's. Two 1.3.0 changes touch the publish anyway, and both keep it
+working:
+
+- `/api/sync/photos/<YOYO>/<PHOTO>` finds the yoyo and photo without regard to
+  uuid case. It still stores the file under the name in the URL.
+- `PUT /api/yoyos/:id` now changes only the fields it is sent. The apps don't
+  use it today; if a future version does, it can send just what changed.
+
 ## CSV
 
 The web CSV export now has a `uuid` column, which `CSVImporter.swift` already
 matches on. Cells that a spreadsheet would run as a formula (starting with `=`,
-`@`, or `+`/`-` followed by something other than a number) get a leading `'`.
-The web importer removes it again. The Apple importer keeps values as written,
-so those rare cells would keep the `'` until the app removes it too.
+`@`, `+`, `-`, tab or CR) get a leading `'`, unless the whole cell is a plain
+number such as `-5`. The web importer removes the `'` again. The Apple importer
+keeps values as written, so those cells (for example a note starting "- ")
+keep the `'` until the app removes it too.
 
 ## Ideas for the next Apple app update
 

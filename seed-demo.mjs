@@ -4,13 +4,15 @@
 //   node seed-demo.mjs                 -> writes data/demo.db (safe default)
 //   SEED_DB_PATH=/var/data/yoyos.db node seed-demo.mjs   -> a deploy's DB
 //
-// Safety: it refuses to overwrite a database that already has yoyos unless you
-// pass FORCE=1, so it can never clobber a real collection by accident.
+// Safety: it only ever writes to SEED_DB_PATH (or data/demo.db). It ignores
+// DB_PATH on purpose: inside Docker and on most hosts DB_PATH is the live
+// collection. It refuses to overwrite a database that already has yoyos unless
+// FORCE=1 exactly (FORCE=0 or FORCE=no does not count).
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DB_PATH = process.env.SEED_DB_PATH || process.env.DB_PATH || 'data/demo.db';
+const DB_PATH = process.env.SEED_DB_PATH || 'data/demo.db';
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 // A mix on purpose: mono + bi-metal, budget + premium, several conditions, a few
@@ -76,7 +78,7 @@ if (!cols.includes('sale_status')) db.exec("ALTER TABLE yoyos ADD COLUMN sale_st
 if (!cols.includes('sale_price')) db.exec('ALTER TABLE yoyos ADD COLUMN sale_price REAL');
 
 const existing = db.prepare('SELECT COUNT(*) AS c FROM yoyos').get().c;
-if (existing > 0 && !process.env.FORCE) {
+if (existing > 0 && process.env.FORCE !== '1') {
   console.error(`Refusing to overwrite ${DB_PATH} — it already has ${existing} yoyos.\n` +
     `If you really mean to wipe and reseed it, re-run with FORCE=1.`);
   process.exit(1);

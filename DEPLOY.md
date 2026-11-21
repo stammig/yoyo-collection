@@ -81,8 +81,12 @@ Render is a good default: simple, free to try, HTTPS included.
    collection, use Starter.
 4. (Optional) In the service's **Environment** tab, add the variable for your
    chosen mode from Step 0:
-   - Public showcase: `READ_ONLY` = `true`
+   - Public showcase you manage from the site: `ADMIN_PASSWORD` = a strong
+     password (recommended: visitors can only look; you sign in to edit)
    - Private: `AUTH_USER` = your username, `AUTH_PASS` = a strong password
+   - Public showcase with no sign-in at all: **don't set `READ_ONLY` yet.** It
+     blocks Restore too, so load your collection in Step 3 first, then add
+     `READ_ONLY` = `true`.
 5. Click **Deploy**. After a minute or two you'll get a URL like
    `https://yoyo-collection-xxxx.onrender.com`. Open it to confirm it loads.
 
@@ -108,6 +112,10 @@ Backup/Restore:
 2. Open the **hosted** app's URL, log in if you set `ADMIN_PASSWORD`, and click
    **⤴ Restore**, choose that zip. It replaces the hosted collection with your
    backup. Done — yoyos and photos all moved.
+3. Showcase with no sign-in: now add `READ_ONLY` = `true` in the Environment
+   tab. From then on nobody can change the site, you included; to load a new
+   backup later, remove `READ_ONLY`, restore, and add it back. (With
+   `ADMIN_PASSWORD` instead you never need to do this: sign in and restore.)
 
 (CSV Import/Export still exists for spreadsheet-style edits, but it does **not**
 carry photos — Backup/Restore does. Backup is also how you make periodic safety

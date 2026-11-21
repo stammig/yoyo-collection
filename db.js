@@ -1,14 +1,12 @@
-// SQLite access layer: a thin better-sqlite3-compatible wrapper around Node's
-// built-in `node:sqlite`, plus schema bootstrap and column migrations that run
-// once at startup. Every migration below is an idempotent `ALTER TABLE ...
-// IF NOT EXISTS`-style check, so this file is safe to run against a database
-// from any earlier version of the app — new columns just get added in place.
-import { DatabaseSync } from 'node:sqlite';
+// The app's own database: opened from DB_PATH and migrated to the current
+// schema on import. Everything that can be used without side effects lives in
+// sqlite.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { canonicalCondition, canonicalComposition } from './vocab.js';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { openDatabase, migrate, nextRev as nextRevIn } from './sqlite.js';
+
+export { openDatabase, backfillUuids, backfillPhotoUuids } from './sqlite.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,201 +15,15 @@ export const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'yoyo
 // Make sure the directory for the database file exists.
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-// We use Node's built-in SQLite (`node:sqlite`) rather than the native
-// `better-sqlite3` add-on: some shared hosts (e.g. LiteSpeed/cPanel on older
-// glibc) can neither load its prebuilt binary nor compile it. `node:sqlite`
-// ships inside the Node runtime, so there's nothing to build.
-//
-// The wrapper below exposes the small slice of the better-sqlite3 API this app
-// relies on (prepare / exec / pragma / transaction), so the rest of the code is
-// unchanged. `openDatabase` is also reused by the restore endpoint.
-export function openDatabase(file, opts = {}) {
-  const raw = new DatabaseSync(file, opts);
-
-  const prepare = (sql) => {
-    const stmt = raw.prepare(sql);
-    // Match better-sqlite3's object binding: keys like { id } bind to @id / :id,
-    // and extra keys that don't map to a placeholder are ignored.
-    stmt.setAllowBareNamedParameters?.(true);
-    stmt.setAllowUnknownNamedParameters?.(true);
-    return stmt;
-  };
-
-  return {
-    raw,
-    prepare,
-    exec: (sql) => raw.exec(sql),
-    pragma: (stmt) => raw.exec(`PRAGMA ${stmt}`),
-    // better-sqlite3-style transaction: returns a function that runs `fn` inside
-    // BEGIN/COMMIT, rolling back on error.
-    transaction(fn) {
-      return (...args) => {
-        raw.exec('BEGIN');
-        try {
-          const result = fn(...args);
-          raw.exec('COMMIT');
-          return result;
-        } catch (err) {
-          raw.exec('ROLLBACK');
-          throw err;
-        }
-      };
-    },
-    close: () => raw.close(),
-  };
-}
-
 const db = openDatabase(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+migrate(db);
 
-// Apply the schema on startup (all statements are idempotent).
-const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-db.exec(schema);
-
-// Migrate existing databases that predate the custom-fields feature.
-const yoyoCols = db.prepare('PRAGMA table_info(yoyos)').all().map((c) => c.name);
-if (!yoyoCols.includes('custom')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN custom TEXT NOT NULL DEFAULT '{}'");
-}
-if (!yoyoCols.includes('retired')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN retired INTEGER NOT NULL DEFAULT 0');
-}
-if (!yoyoCols.includes('sale_status')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN sale_status TEXT NOT NULL DEFAULT ''");
-}
-if (!yoyoCols.includes('sale_price')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN sale_price REAL');
-}
-if (!yoyoCols.includes('trade_value')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN trade_value REAL');
-}
-if (!yoyoCols.includes('purchase_date')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''");
-}
-if (!yoyoCols.includes('sold_date')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN sold_date TEXT NOT NULL DEFAULT ''");
-}
-if (!yoyoCols.includes('seller')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN seller TEXT NOT NULL DEFAULT ''");
-}
-if (!yoyoCols.includes('buyer')) {
-  db.exec("ALTER TABLE yoyos ADD COLUMN buyer TEXT NOT NULL DEFAULT ''");
-}
-if (!yoyoCols.includes('market_value')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN market_value REAL');
-}
-if (!yoyoCols.includes('sale_listed_at')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN sale_listed_at TEXT');
-}
-// Backfill for listings that predate sale_listed_at: without this the
-// "Days listed" column is a wall of "—" that reads as broken. Stamping "now"
-// means they show 0d today but age accurately from here on. Idempotent —
-// only ever fills NULL/empty on rows that are currently listed. (The native
-// app does the same one-time stamp on its side; values converge via sync.)
-db.exec(`UPDATE yoyos SET sale_listed_at = datetime('now')
-  WHERE sale_status IN ('For Sale', 'For Trade', 'For Sale or Trade')
-    AND (sale_listed_at IS NULL OR sale_listed_at = '')`);
-for (const col of ['finish', 'shape', 'edition', 'serial_number', 'signature']) {
-  if (!yoyoCols.includes(col)) {
-    db.exec(`ALTER TABLE yoyos ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
-  }
-}
-
-// Soft-delete tombstone: DELETE /api/yoyos/:id sets this instead of removing
-// the row (see server.js), so a future sync can propagate the deletion to
-// other devices instead of a stale copy resurrecting it. Every read filters
-// `WHERE deleted_at IS NULL`.
-if (!yoyoCols.includes('deleted_at')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN deleted_at TEXT');
-}
-
-// Stable, client-independent id for every yoyo — the anchor a future sync
-// protocol would key off of, since auto-increment `id` values collide across
-// devices that create rows offline. Backfill any rows without one
-// (pre-existing rows, or rows restored from a backup made before this column
-// existed), then enforce uniqueness.
-if (!yoyoCols.includes('uuid')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN uuid TEXT');
-}
-backfillUuids(db);
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_yoyos_uuid ON yoyos(uuid)');
-
-// Assign a UUID to every yoyo that lacks one. Exported so the restore endpoint
-// can re-run it after importing rows from an older backup.
-export function backfillUuids(database) {
-  const rows = database.prepare("SELECT id FROM yoyos WHERE uuid IS NULL OR uuid = ''").all();
-  if (!rows.length) return 0;
-  const setUuid = database.prepare('UPDATE yoyos SET uuid = ? WHERE id = ?');
-  database.transaction((rs) => { for (const r of rs) setUuid.run(crypto.randomUUID(), r.id); })(rows);
-  return rows.length;
-}
-
-// ---- Sync support: photo uuids + revision cursor ----
-
-// Photos get the same stable cross-device identity yoyos have — sync manifests
-// key photos by uuid. Existing filenames are untouched so /uploads URLs stay
-// valid; only photos pushed from a device are named <uuid>.<ext>.
-const photoCols = db.prepare('PRAGMA table_info(photos)').all().map((c) => c.name);
-if (!photoCols.includes('uuid')) {
-  db.exec('ALTER TABLE photos ADD COLUMN uuid TEXT');
-}
-backfillPhotoUuids(db);
-
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_uuid ON photos(uuid)');
-
-// Assign a UUID to every photo that lacks one. Exported so the restore endpoint
-// can re-run it after importing rows from a pre-sync backup.
-export function backfillPhotoUuids(database) {
-  const rows = database.prepare("SELECT id FROM photos WHERE uuid IS NULL OR uuid = ''").all();
-  if (!rows.length) return 0;
-  const setUuid = database.prepare('UPDATE photos SET uuid = ? WHERE id = ?');
-  database.transaction((rs) => { for (const r of rs) setUuid.run(crypto.randomUUID(), r.id); })(rows);
-  return rows.length;
-}
-
-// Monotonic revision cursor for sync: every server write stamps its row with
-// the next value of a global counter (settings.sync_rev), and clients pull
-// `WHERE rev > since`. Revs order the change feed; updated_at timestamps only
-// resolve conflicts. On the first boot with sync, existing rows get distinct
-// revs in edit order so a fresh client can page through history.
-if (!yoyoCols.includes('rev')) {
-  db.exec('ALTER TABLE yoyos ADD COLUMN rev INTEGER NOT NULL DEFAULT 0');
-}
-db.exec('CREATE INDEX IF NOT EXISTS idx_yoyos_rev ON yoyos(rev)');
-if (!db.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get()) {
-  const rows = db.prepare('SELECT id FROM yoyos ORDER BY updated_at, id').all();
-  const setRev = db.prepare('UPDATE yoyos SET rev = ? WHERE id = ?');
-  db.transaction(() => {
-    rows.forEach((r, i) => setRev.run(i + 1, r.id));
-    db.prepare("INSERT INTO settings (key, value) VALUES ('sync_rev', ?)").run(String(rows.length));
-  })();
-}
-
-// Rewrite retired vocabulary in place. This must run after the rev column and
-// the sync_rev counter exist (just above), because it stamps each fixed row
-// with nextRev(); run any earlier and an older install crashes on startup.
-// (NMBTS -> NMTBS, "Plastic" -> MN; see
-// vocab.js). Idempotent: once clean, the WHERE matches nothing. Each changed
-// row gets a new rev so sync clients pull the corrected value.
-{
-  const stale = db.prepare(
-    `SELECT id, condition, composition FROM yoyos
-     WHERE upper(trim(condition)) = 'NMBTS' OR lower(trim(composition)) IN ('plastic','mono-material','bi-material','tri-material','mono-metal','bi-metal','tri-metal','mn','bi','tri') AND composition NOT IN ('MN','BI','TRI')`
-  ).all();
-  if (stale.length) {
-    const fix = db.prepare('UPDATE yoyos SET condition = ?, composition = ?, rev = ? WHERE id = ?');
-    db.transaction(() => {
-      for (const r of stale) fix.run(canonicalCondition(r.condition), canonicalComposition(r.composition), nextRev(db), r.id);
-    })();
-    console.log(`vocab: normalized ${stale.length} yoyo(s) (NMBTS -> NMTBS / composition codes)`);
-  }
-}
 // Returns the next global revision. Call inside the surrounding write
 // transaction so the bump commits or rolls back with the row it stamps.
 export function nextRev(database = db) {
-  database.prepare("UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'sync_rev'").run();
-  return Number(database.prepare("SELECT value FROM settings WHERE key = 'sync_rev'").get().value);
+  return nextRevIn(database);
 }
 
 export default db;
