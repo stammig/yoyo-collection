@@ -2311,7 +2311,9 @@ app.use((err, _req, res, _next) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`🪀  Yoyo collection running at http://localhost:${PORT}`);
+  // The bound port, not PORT: with PORT=0 the system picks a free one (the
+  // test helper relies on reading it from this line).
+  console.log(`🪀  Yoyo collection running at http://localhost:${server.address().port}`);
   // A public READ_ONLY site with no password has no owner: nobody can sign in,
   // so nobody can restore or edit from the browser. Usually that's the
   // intent, but say so, since it's easy to set up by accident.
